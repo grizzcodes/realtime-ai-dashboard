@@ -14,6 +14,31 @@ const app = express();
 
 app.use(express.json());
 
+// Root route
+app.get('/', (req, res) => {
+  res.json({
+    message: '🚀 Real-time AI Dashboard - Day 1 Foundation',
+    status: 'operational',
+    timestamp: new Date().toISOString(),
+    endpoints: {
+      health: '/health',
+      webhooks: {
+        test: 'POST /webhooks/test',
+        slack: 'POST /webhooks/slack',
+        gmail: 'POST /webhooks/gmail',
+        notion: 'POST /webhooks/notion',
+        fireflies: 'POST /webhooks/fireflies'
+      }
+    },
+    nextSteps: [
+      'Add real webhook integrations',
+      'Integrate AI processing',
+      'Add WebSocket support',
+      'Build frontend dashboard'
+    ]
+  });
+});
+
 app.get('/health', (req, res) => {
   res.json({ 
     status: 'healthy', 
@@ -30,6 +55,6 @@ app.post('/webhooks/test', (req, res) => {
 const PORT = process.env.PORT || 3002;
 app.listen(PORT, () => {
   console.log(`✅ Server running on port ${PORT}`);
-  console.log(`📊 Dashboard: http://localhost:${PORT}/health`);
-  console.log(`🔗 Test webhook: POST http://localhost:${PORT}/webhooks/test`);
+  console.log(`📊 Dashboard: http://localhost:${PORT}`);
+  console.log(`🔗 Health check: http://localhost:${PORT}/health`);
 });
