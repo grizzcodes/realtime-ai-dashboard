@@ -13,10 +13,77 @@ const io = socketIo(server, {
 app.use(express.json());
 app.use(cors());
 
-// Simple mock services for now
-const mockService = {
-  async testConnection() {
-    return { success: false, error: 'Not configured yet' };
+// Mock integration tests
+const integrationTests = {
+  notion: async () => {
+    if (!process.env.NOTION_API_KEY) {
+      return { success: false, error: 'NOTION_API_KEY not configured' };
+    }
+    try {
+      const response = await fetch('https://api.notion.com/v1/users/me', {
+        headers: { 'Authorization': `Bearer ${process.env.NOTION_API_KEY}`, 'Notion-Version': '2022-06-28' }
+      });
+      return response.ok ? { success: true } : { success: false, error: 'Invalid API key' };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  },
+  
+  gmail: async () => {
+    if (!process.env.GOOGLE_REFRESH_TOKEN) {
+      return { success: false, error: 'GOOGLE_REFRESH_TOKEN not configured' };
+    }
+    return { success: true, message: 'Gmail OAuth configured' };
+  },
+  
+  slack: async () => {
+    if (!process.env.SLACK_BOT_TOKEN) {
+      return { success: false, error: 'SLACK_BOT_TOKEN not configured' };
+    }
+    try {
+      const response = await fetch('https://slack.com/api/auth.test', {
+        headers: { 'Authorization': `Bearer ${process.env.SLACK_BOT_TOKEN}` }
+      });
+      const data = await response.json();
+      return data.ok ? { success: true } : { success: false, error: data.error };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  },
+  
+  fireflies: async () => {
+    if (!process.env.FIREFLIES_API_KEY) {
+      return { success: false, error: 'FIREFLIES_API_KEY not configured' };
+    }
+    return { success: true, message: 'Fireflies API configured' };
+  },
+  
+  calendar: async () => {
+    if (!process.env.GOOGLE_CLIENT_ID) {
+      return { success: false, error: 'Google Calendar requires OAuth setup' };
+    }
+    return { success: false, error: 'Calendar API not implemented yet' };
+  },
+  
+  linear: async () => {
+    if (!process.env.LINEAR_API_KEY) {
+      return { success: false, error: 'LINEAR_API_KEY not configured' };
+    }
+    return { success: false, error: 'Linear API not implemented yet' };
+  },
+  
+  github: async () => {
+    if (!process.env.GITHUB_TOKEN) {
+      return { success: false, error: 'GITHUB_TOKEN not configured' };
+    }
+    try {
+      const response = await fetch('https://api.github.com/user', {
+        headers: { 'Authorization': `token ${process.env.GITHUB_TOKEN}` }
+      });
+      return response.ok ? { success: true } : { success: false, error: 'Invalid token' };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
   }
 };
 
@@ -29,23 +96,38 @@ app.get('/', (req, res) => {
       health: '/health',
       tasks: '/api/tasks',
       'ai-test': '/api/ai-test',
-      'google-auth': '/auth/google'
+      'google-auth': '/auth/google',
+      'test-integrations': '/api/test/{integration}'
     }
   });
 });
 
-// Health check
-app.get('/health', (req, res) => {
+// Health check with all integration status
+app.get('/health', async (req, res) => {
+  const apiConnections = {};
+  
+  for (const [name, testFn] of Object.entries(integrationTests)) {
+    apiConnections[name] = await testFn();
+  }
+  
   res.json({ 
     status: 'healthy',
     timestamp: new Date().toISOString(),
-    apiConnections: {
-      notion: { success: false, error: 'Not configured' },
-      gmail: { success: false, error: 'Not configured' },
-      slack: { success: false, error: 'Not configured' },
-      fireflies: { success: false, error: 'Not configured' }
-    }
+    apiConnections
   });
+});
+
+// Individual integration test endpoints
+app.get('/api/test/:integration', async (req, res) => {
+  const { integration } = req.params;
+  const testFn = integrationTests[integration.toLowerCase()];
+  
+  if (!testFn) {
+    return res.status(404).json({ success: false, error: 'Integration not found' });
+  }
+  
+  const result = await testFn();
+  res.json(result);
 });
 
 // Tasks endpoint
@@ -62,7 +144,7 @@ app.post('/api/ai-test', (req, res) => {
   const mockTasks = [
     {
       id: Date.now(),
-      title: 'Test AI-generated task',
+      title: 'AI-generated test task from backend',
       source: 'ai-test',
       urgency: 3,
       status: 'pending',
@@ -77,7 +159,7 @@ app.post('/api/ai-test', (req, res) => {
   
   res.json({
     success: true,
-    message: 'AI test completed!',
+    message: 'AI test completed! Task created.',
     result: { newTasks: mockTasks }
   });
 });
@@ -166,4 +248,5 @@ server.listen(PORT, () => {
   console.log(`✅ Server running on port ${PORT}`);
   console.log(`📊 Dashboard: http://localhost:3000`);
   console.log(`🔑 Google OAuth: http://localhost:${PORT}/auth/google`);
+  console.log(`🧪 Integration Tests: /api/test/{integration}`);
 });
