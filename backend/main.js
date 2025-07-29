@@ -1,4 +1,4 @@
-//backend/main.js - Enhanced AI-Powered Real-time Dashboard Server
+// backend/main.js - Enhanced AI-Powered Real-time Dashboard Server
 require('dotenv').config();
 
 const express = require('express');
@@ -57,3 +57,38 @@ async function initializeServices() {
     console.log('⚠️ Database not configured - using memory mode');
   }
 }
+
+// Root route
+app.get('/', (req, res) => {
+  const stats = aiProcessor.getStats();
+  res.json({
+    message: '🤖 AI-Powered Real-time Dashboard',
+    status: 'operational',
+    timestamp: new Date().toISOString(),
+    features: {
+      ai: 'OpenAI & Claude analysis',
+      notion: 'Task management integration',
+      webhooks: 'Multi-service monitoring',
+      realtime: 'Live event processing',
+      database: 'Supabase persistence'
+    },
+    stats,
+    endpoints: {
+      health: '/health',
+      tasks: '/api/tasks',
+      events: '/api/events',
+      notion: '/api/notion',
+      'ai-test': '/api/ai-test'
+    }
+  });
+});
+
+app.get('/health', async (req, res) => {
+  const stats = await aiProcessor.getStats();
+  res.json({ 
+    status: 'healthy', 
+    timestamp: new Date().toISOString(),
+    message: 'AI-powered analysis active!',
+    stats
+  });
+});
