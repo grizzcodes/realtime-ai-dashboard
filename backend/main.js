@@ -1,2 +1,59 @@
-// backend/main.js - Enhanced AI-Powered Real-time Dashboard Server
-require('dotenv').config();\n\nconst express = require('express');\nconst http = require('http');\nconst socketIo = require('socket.io');\nconst cors = require('cors');\nconst RealTimeMonitor = require('./src/webhooks/webhookHandler');\nconst IntelligentProcessor = require('./src/ai/intelligentProcessor');\nconst NotionService = require('./src/services/notionService');\n\nconsole.log('🚀 Starting AI-Powered Real-time Dashboard...');\n\nconst app = express();\nconst server = http.createServer(app);\nconst io = socketIo(server, {\n  cors: {\n    origin: \"http://localhost:3000\",\n    methods: [\"GET\", \"POST\"]\n  }\n});\n\napp.use(express.json());\napp.use(cors());\n\n// Initialize services\nconst webhookMonitor = new RealTimeMonitor();\nconst aiProcessor = new IntelligentProcessor();\nconst notionService = new NotionService();\n\n// Socket.io connection handling\nio.on('connection', (socket) => {\n  console.log('🔗 Client connected to dashboard');\n  \n  socket.on('disconnect', () => {\n    console.log('❌ Client disconnected');\n  });\n});\n\n// Test API connections on startup\nasync function initializeServices() {\n  console.log('🔌 Testing API connections...');\n  \n  const notionTest = await notionService.testConnection();\n  if (notionTest.success) {\n    console.log('✅ Notion API connected');\n  } else {\n    console.log('❌ Notion API failed:', notionTest.error);\n  }\n  \n  // Test database connection\n  const db = aiProcessor.getDatabase();\n  const dbTest = await db.testConnection();\n  if (dbTest.success) {\n    console.log('✅ Database connected');\n  } else {\n    console.log('⚠️ Database not configured - using memory mode');\n  }\n}\n\n// Root route\napp.get('/', (req, res) => {\n  const stats = aiProcessor.getStats();\n  res.json({\n    message: '🤖 AI-Powered Real-time Dashboard',\n    status: 'operational',\n    timestamp: new Date().toISOString(),\n    features: {\n      ai: 'OpenAI & Claude analysis',\n      notion: 'Task management integration',\n      webhooks: 'Multi-service monitoring',\n      realtime: 'Live event processing',\n      database: 'Supabase persistence'\n    },\n    stats,\n    endpoints: {\n      health: '/health',\n      tasks: '/api/tasks',\n      events: '/api/events',\n      notion: '/api/notion',\n      'ai-test': '/api/ai-test'\n    }\n  });\n});\n\napp.get('/health', async (req, res) => {\n  const stats = await aiProcessor.getStats();\n  res.json({ \n    status: 'healthy', \n    timestamp: new Date().toISOString(),\n    message: 'AI-powered analysis active!',\n    stats\n  });\n});\n\n// API Routes\napp.get('/api/tasks', async (req, res) => {\n  const stats = await aiProcessor.getStats();\n  res.json({\n    tasks: aiProcessor.getTopTasks(20),\n    stats,\n    timestamp: new Date()\n  });\n});\n\napp.get('/api/events', async (req, res) => {\n  const events = await aiProcessor.getRecentEvents(30);\n  const stats = await aiProcessor.getStats();\n  res.json({\n    events,\n    stats,\n    timestamp: new Date()\n  });\n});\n\napp.put('/api/tasks/:taskId/status', async (req, res) => {\n  const { status } = req.body;\n  const task = await aiProcessor.updateTaskStatus(req.params.taskId, status);\n  \n  if (task) {\n    // Emit real-time update\n    io.emit('task_updated', task);\n    \n    // Update stats\n    const stats = await aiProcessor.getStats();\n    io.emit('stats_update', stats);\n    \n    res.json({ success: true, task });\n  } else {\n    res.status(404).json({ error: 'Task not found' });\n  }\n});\n\n// Notion integration routes\napp.get('/api/notion/pages', async (req, res) => {\n  try {\n    const pages = await notionService.getRecentPages(10);\n    res.json({ pages });\n  } catch (error) {\n    res.status(500).json({ error: error.message });\n  }\n});\n\napp.get('/api/notion/databases', async (req, res) => {\n  try {\n    const databases = await notionService.getTaskDatabases();\n    res.json({ databases });\n  } catch (error) {\n    res.status(500).json({ error: error.message });\n  }\n});\n\napp.post('/api/notion/task', async (req, res) => {\n  try {\n    const { title, properties } = req.body;\n    const result = await notionService.createTask(title, properties);\n    res.json(result);\n  } catch (error) {\n    res.status(500).json({ error: error.message });\n  }\n});\n\n// AI Test endpoint\napp.post('/api/ai-test', async (req, res) => {\n  try {\n    const { message, source = 'test' } = req.body;\n    \n    const testEvent = {\n      source,\n      type: 'manual_test',\n      data: { message },\n      timestamp: new Date(),\n      priority: 3\n    };\n\n    console.log('🧪 Testing AI with manual event...');\n    const result = await aiProcessor.processEvent(testEvent);\n    \n    // Emit real-time updates if new tasks were created\n    if (result.newTasks.length > 0) {\n      result.newTasks.forEach(task => {\n        io.emit('new_task', task);\n      });\n      \n      // Update stats\n      const stats = await aiProcessor.getStats();\n      io.emit('stats_update', stats);\n    }\n    \n    // Emit the event to activity feed\n    io.emit('new_event', result.event);\n    \n    res.json({\n      success: true,\n      message: 'AI analysis complete!',\n      result\n    });\n  } catch (error) {\n    console.error('AI test error:', error);\n    res.status(500).json({ \n      error: error.message,\n      suggestion: 'Check your OpenAI/Claude API keys in .env file'\n    });\n  }\n});\n\n// Enhanced event processing with real-time updates\nconst eventTypes = ['slack:message', 'gmail:new_email', 'notion:change', 'fireflies:transcript'];\n\neventTypes.forEach(eventType => {\n  webhookMonitor.on(eventType, async (event) => {\n    console.log(`📨 Processing: ${eventType}`);\n    \n    try {\n      // AI analysis\n      const result = await aiProcessor.processEvent(event);\n      \n      // Emit real-time updates\n      io.emit('new_event', result.event);\n      \n      if (result.newTasks.length > 0) {\n        result.newTasks.forEach(task => {\n          io.emit('new_task', task);\n          console.log(`📡 Broadcasting new task: ${task.title}`);\n        });\n        \n        // Update stats\n        const stats = await aiProcessor.getStats();\n        io.emit('stats_update', stats);\n      }\n      \n      // Optionally sync high-priority tasks to Notion\n      if (result.newTasks.length > 0) {\n        for (const task of result.newTasks) {\n          if (task.urgency >= 4) { // High priority tasks\n            console.log(`📝 Syncing high-priority task to Notion: ${task.title}`);\n            await notionService.createTask(task.title, {\n              Status: { select: { name: 'Todo' } },\n              Priority: { select: { name: 'High' } },\n              Source: { rich_text: [{ text: { content: task.source } }] }\n            });\n          }\n        }\n      }\n      \n      console.log(`✅ Event processed: ${result.newTasks.length} tasks, urgency ${result.analysis.urgency}/5`);\n    } catch (error) {\n      console.error('❌ Processing error:', error.message);\n    }\n  });\n});\n\n// Mount webhook routes\napp.use('/webhooks', webhookMonitor.app);\n\nconst PORT = process.env.PORT || 3002;\nconst WEBHOOK_PORT = 3001;\n\n// Start servers\nserver.listen(PORT, async () => {\n  console.log(`✅ AI Dashboard server running on port ${PORT}`);\n  console.log(`📊 Dashboard: http://localhost:${PORT}`);\n  console.log(`🔗 WebSocket server active for real-time updates`);\n  console.log(`🧪 Test AI: POST http://localhost:${PORT}/api/ai-test`);\n  \n  await initializeServices();\n});\n\nwebhookMonitor.start(WEBHOOK_PORT);\n\nconsole.log('\\n🎯 Ready for action! Try these:');\nconsole.log('1. Visit http://localhost:3002 to see the dashboard');\nconsole.log('2. Start frontend: cd frontend && npm start');\nconsole.log('3. Test AI with curl command or dashboard button');\nconsole.log('4. Check tasks: http://localhost:3002/api/tasks');\nconsole.log('5. View Notion pages: http://localhost:3002/api/notion/pages');\n\n// Handle graceful shutdown\nprocess.on('SIGINT', () => {\n  console.log('\\n🛑 Shutting down gracefully...');\n  webhookMonitor.stop();\n  server.close(() => {\n    console.log('✅ Server stopped');\n    process.exit(0);\n  });\n});"
+//backend/main.js - Enhanced AI-Powered Real-time Dashboard Server
+require('dotenv').config();
+
+const express = require('express');
+const http = require('http');
+const socketIo = require('socket.io');
+const cors = require('cors');
+const RealTimeMonitor = require('./src/webhooks/webhookHandler');
+const IntelligentProcessor = require('./src/ai/intelligentProcessor');
+const NotionService = require('./src/services/notionService');
+
+console.log('🚀 Starting AI-Powered Real-time Dashboard...');
+
+const app = express();
+const server = http.createServer(app);
+const io = socketIo(server, {
+  cors: {
+    origin: "http://localhost:3000",
+    methods: ["GET", "POST"]
+  }
+});
+
+app.use(express.json());
+app.use(cors());
+
+// Initialize services
+const webhookMonitor = new RealTimeMonitor();
+const aiProcessor = new IntelligentProcessor();
+const notionService = new NotionService();
+
+// Socket.io connection handling
+io.on('connection', (socket) => {
+  console.log('🔗 Client connected to dashboard');
+  
+  socket.on('disconnect', () => {
+    console.log('❌ Client disconnected');
+  });
+});
+
+// Test API connections on startup
+async function initializeServices() {
+  console.log('🔌 Testing API connections...');
+  
+  const notionTest = await notionService.testConnection();
+  if (notionTest.success) {
+    console.log('✅ Notion API connected');
+  } else {
+    console.log('❌ Notion API failed:', notionTest.error);
+  }
+  
+  // Test database connection
+  const db = aiProcessor.getDatabase();
+  const dbTest = await db.testConnection();
+  if (dbTest.success) {
+    console.log('✅ Database connected');
+  } else {
+    console.log('⚠️ Database not configured - using memory mode');
+  }
+}
