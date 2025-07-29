@@ -7,6 +7,8 @@ const socketIo = require('socket.io');
 const cors = require('cors');
 const RealTimeMonitor = require('./src/webhooks/webhookHandler');
 const IntelligentProcessor = require('./src/ai/intelligentProcessor');
+const ActionEngine = require('./src/ai/actionEngine');
+const ContextManager = require('./src/ai/contextManager');
 const NotionService = require('./src/services/notionService');
 const GmailService = require('./src/services/gmailService');
 const SlackService = require('./src/services/slackService');
@@ -33,6 +35,16 @@ const notionService = new NotionService();
 const gmailService = new GmailService();
 const slackService = new SlackService();
 const firefliesService = new FirefliesService();
+
+// Initialize AI intelligence
+const contextManager = new ContextManager();
+const actionEngine = new ActionEngine({
+  notion: notionService,
+  gmail: gmailService,
+  slack: slackService,
+  fireflies: firefliesService,
+  aiProcessor: aiProcessor
+});
 
 // Socket.io connection handling
 io.on('connection', (socket) => {
@@ -83,19 +95,24 @@ async function initializeServices() {
   } else {
     console.log('⚠️ Database not configured - using memory mode');
   }
+
+  console.log('🧠 AI Intelligence systems initialized');
 }
 
 // Root route
 app.get('/', (req, res) => {
   const stats = aiProcessor.getStats();
+  const smartSuggestions = contextManager.generateSmartSuggestions();
+  
   res.json({
     message: '🤖 AI-Powered Real-time Dashboard',
     status: 'operational',
     timestamp: new Date().toISOString(),
     features: {
       ai: 'OpenAI & Claude analysis',
+      intelligence: 'Context-aware action suggestions',
       notion: 'Task management integration',
-      gmail: 'Email monitoring',
+      gmail: 'Email monitoring & drafting',
       slack: 'Team communication',
       fireflies: 'Meeting transcript analysis',
       webhooks: 'Multi-service monitoring',
@@ -103,10 +120,13 @@ app.get('/', (req, res) => {
       database: 'Supabase persistence'
     },
     stats,
+    smartSuggestions: smartSuggestions.slice(0, 3),
     endpoints: {
       health: '/health',
       tasks: '/api/tasks',
       events: '/api/events',
+      suggestions: '/api/suggestions',
+      actions: '/api/actions',
       notion: '/api/notion',
       gmail: '/api/gmail',
       slack: '/api/slack',
@@ -118,11 +138,14 @@ app.get('/', (req, res) => {
 
 app.get('/health', async (req, res) => {
   const stats = await aiProcessor.getStats();
+  const aiContext = contextManager.getAIContext();
+  
   res.json({ 
     status: 'healthy', 
     timestamp: new Date().toISOString(),
     message: 'AI-powered analysis active!',
-    stats
+    stats,
+    aiContext
   });
 });
 
@@ -146,6 +169,39 @@ app.get('/api/events', async (req, res) => {
   });
 });
 
+// New intelligent endpoints
+app.get('/api/suggestions', async (req, res) => {
+  try {
+    const suggestions = contextManager.generateSmartSuggestions();
+    res.json({
+      success: true,
+      suggestions,
+      context: contextManager.getAIContext(),
+      timestamp: new Date()
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/actions/execute', async (req, res) => {
+  try {
+    const { actionId, action } = req.body;
+    const result = await actionEngine.executeAction(action);
+    
+    // Broadcast action execution to connected clients
+    io.emit('action_executed', { actionId, result });
+    
+    res.json({
+      success: true,
+      result,
+      timestamp: new Date()
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.put('/api/tasks/:taskId/status', async (req, res) => {
   const { status } = req.body;
   const task = await aiProcessor.updateTaskStatus(req.params.taskId, status);
@@ -153,6 +209,11 @@ app.put('/api/tasks/:taskId/status', async (req, res) => {
   if (task) {
     // Emit real-time update
     io.emit('task_updated', task);
+    
+    // Update context with task completion
+    if (status === 'completed') {
+      contextManager.addContext({ source: 'manual', type: 'task_completion' }, [task]);
+    }
     
     // Update stats
     const stats = await aiProcessor.getStats();
@@ -242,7 +303,7 @@ app.get('/api/fireflies/transcript/:id', async (req, res) => {
   }
 });
 
-// AI Test endpoint with meeting transcript simulation
+// Enhanced AI Test endpoint with intelligent actions
 app.post('/api/ai-test', async (req, res) => {
   try {
     const { message, source = 'test' } = req.body;
@@ -252,6 +313,7 @@ app.post('/api/ai-test', async (req, res) => {
       meeting: "Meeting transcript: John said 'We need to fix the database performance issue before the client demo on Thursday. Sarah, can you handle the optimization? Also, we should schedule a follow-up with the marketing team about the Q4 campaign launch.'",
       email: "Email from client: Budget approval needed for Q4 marketing campaign by Friday",
       slack: "Slack message: @channel The production server is down! Need immediate assistance. Customer support is getting complaints.",
+      gmail: "Email from client: Budget approval needed for Q4 marketing campaign by Friday. Meeting with stakeholders needed ASAP.",
       default: message
     };
 
@@ -268,6 +330,24 @@ app.post('/api/ai-test', async (req, res) => {
     console.log(`🧪 Testing AI with ${source} scenario...`);
     const result = await aiProcessor.processEvent(testEvent);
     
+    // Add context to context manager
+    contextManager.addContext(testEvent, result.newTasks);
+    
+    // Generate intelligent actions for new tasks
+    const intelligentActions = [];
+    for (const task of result.newTasks) {
+      const taskContext = contextManager.getContextForTask(task);
+      const actions = await actionEngine.processIntelligentActions(task, {
+        emailContent: source === 'gmail' ? { 
+          subject: 'Budget Approval Request',
+          from: 'client@example.com',
+          body: testMessage 
+        } : null,
+        ...taskContext
+      });
+      intelligentActions.push(...actions);
+    }
+    
     // Emit real-time updates if new tasks were created
     if (result.newTasks.length > 0) {
       result.newTasks.forEach(task => {
@@ -279,6 +359,11 @@ app.post('/api/ai-test', async (req, res) => {
       io.emit('stats_update', stats);
     }
     
+    // Emit intelligent actions
+    if (intelligentActions.length > 0) {
+      io.emit('intelligent_actions', intelligentActions);
+    }
+    
     // Emit the event to activity feed
     io.emit('new_event', result.event);
     
@@ -286,6 +371,8 @@ app.post('/api/ai-test', async (req, res) => {
       success: true,
       message: 'AI analysis complete!',
       result,
+      intelligentActions,
+      suggestions: contextManager.generateSmartSuggestions().slice(0, 3),
       scenario: source
     });
   } catch (error) {
@@ -297,7 +384,7 @@ app.post('/api/ai-test', async (req, res) => {
   }
 });
 
-// Enhanced event processing with real-time updates
+// Enhanced event processing with intelligent actions
 const eventTypes = ['slack:message', 'gmail:new_email', 'notion:change', 'fireflies:transcript'];
 
 eventTypes.forEach(eventType => {
@@ -324,6 +411,21 @@ eventTypes.forEach(eventType => {
       // AI analysis
       const result = await aiProcessor.processEvent(event);
       
+      // Add to context manager
+      contextManager.addContext(event, result.newTasks);
+      
+      // Generate intelligent actions
+      const intelligentActions = [];
+      for (const task of result.newTasks) {
+        const taskContext = contextManager.getContextForTask(task);
+        const actions = await actionEngine.processIntelligentActions(task, {
+          emailContent: event.data.emailContent,
+          meetingTranscript: event.data.actionableContent,
+          ...taskContext
+        });
+        intelligentActions.push(...actions);
+      }
+      
       // Emit real-time updates
       io.emit('new_event', result.event);
       
@@ -338,21 +440,22 @@ eventTypes.forEach(eventType => {
         io.emit('stats_update', stats);
       }
       
-      // Optionally sync high-priority tasks to Notion
-      if (result.newTasks.length > 0) {
-        for (const task of result.newTasks) {
-          if (task.urgency >= 4) { // High priority tasks
-            console.log(`📝 Syncing high-priority task to Notion: ${task.title}`);
-            await notionService.createTask(task.title, {
-              Status: { select: { name: 'Todo' } },
-              Priority: { select: { name: 'High' } },
-              Source: { rich_text: [{ text: { content: task.source } }] }
-            });
-          }
+      // Emit intelligent actions
+      if (intelligentActions.length > 0) {
+        io.emit('intelligent_actions', intelligentActions);
+        console.log(`🧠 Generated ${intelligentActions.length} intelligent actions`);
+      }
+      
+      // Auto-execute approved actions
+      for (const action of intelligentActions) {
+        if (action.autoExecute) {
+          console.log(`🎯 Auto-executing: ${action.description}`);
+          const executionResult = await actionEngine.executeAction(action);
+          io.emit('action_executed', { action, result: executionResult });
         }
       }
       
-      console.log(`✅ Event processed: ${result.newTasks.length} tasks, urgency ${result.analysis.urgency}/5`);
+      console.log(`✅ Event processed: ${result.newTasks.length} tasks, ${intelligentActions.length} actions, urgency ${result.analysis.urgency}/5`);
     } catch (error) {
       console.error('❌ Processing error:', error.message);
     }
@@ -380,9 +483,9 @@ webhookMonitor.start(WEBHOOK_PORT);
 console.log('🎯 Ready for action! Try these:');
 console.log('1. Visit http://localhost:3002 to see the dashboard');
 console.log('2. Start frontend: cd frontend && npm start');
-console.log('3. Test AI scenarios: meeting, email, slack');
-console.log('4. Check integrations: /api/notion/pages, /api/fireflies/transcripts');
-console.log('5. Webhook endpoints: http://localhost:3001/webhooks/*');
+console.log('3. Test AI scenarios: meeting, email, slack, gmail');
+console.log('4. Check suggestions: http://localhost:3002/api/suggestions');
+console.log('5. View intelligent actions in real-time');
 
 // Handle graceful shutdown
 process.on('SIGINT', () => {
