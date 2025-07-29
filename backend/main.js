@@ -9,6 +9,8 @@ const RealTimeMonitor = require('./src/webhooks/webhookHandler');
 const IntelligentProcessor = require('./src/ai/intelligentProcessor');
 const NotionService = require('./src/services/notionService');
 const GmailService = require('./src/services/gmailService');
+const SlackService = require('./src/services/slackService');
+const FirefliesService = require('./src/services/firefliesService');
 
 console.log('🚀 Starting AI-Powered Real-time Dashboard...');
 
@@ -29,6 +31,8 @@ const webhookMonitor = new RealTimeMonitor();
 const aiProcessor = new IntelligentProcessor();
 const notionService = new NotionService();
 const gmailService = new GmailService();
+const slackService = new SlackService();
+const firefliesService = new FirefliesService();
 
 // Socket.io connection handling
 io.on('connection', (socket) => {
@@ -56,6 +60,20 @@ async function initializeServices() {
   } else {
     console.log('❌ Gmail API failed:', gmailTest.error);
   }
+
+  const slackTest = await slackService.testConnection();
+  if (slackTest.success) {
+    console.log('✅ Slack API connected');
+  } else {
+    console.log('❌ Slack API failed:', slackTest.error);
+  }
+
+  const firefliesTest = await firefliesService.testConnection();
+  if (firefliesTest.success) {
+    console.log('✅ Fireflies AI connected');
+  } else {
+    console.log('❌ Fireflies AI failed:', firefliesTest.error);
+  }
   
   // Test database connection
   const db = aiProcessor.getDatabase();
@@ -78,6 +96,8 @@ app.get('/', (req, res) => {
       ai: 'OpenAI & Claude analysis',
       notion: 'Task management integration',
       gmail: 'Email monitoring',
+      slack: 'Team communication',
+      fireflies: 'Meeting transcript analysis',
       webhooks: 'Multi-service monitoring',
       realtime: 'Live event processing',
       database: 'Supabase persistence'
@@ -89,6 +109,8 @@ app.get('/', (req, res) => {
       events: '/api/events',
       notion: '/api/notion',
       gmail: '/api/gmail',
+      slack: '/api/slack',
+      fireflies: '/api/fireflies',
       'ai-test': '/api/ai-test'
     }
   });
@@ -190,20 +212,60 @@ app.get('/api/gmail/email/:id', async (req, res) => {
   }
 });
 
-// AI Test endpoint
+// Slack integration routes
+app.get('/api/slack/messages', async (req, res) => {
+  try {
+    const { channel = 'general' } = req.query;
+    const result = await slackService.getRecentMessages(channel, 10);
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Fireflies integration routes
+app.get('/api/fireflies/transcripts', async (req, res) => {
+  try {
+    const result = await firefliesService.getRecentTranscripts(10);
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/fireflies/transcript/:id', async (req, res) => {
+  try {
+    const result = await firefliesService.getTranscriptById(req.params.id);
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// AI Test endpoint with meeting transcript simulation
 app.post('/api/ai-test', async (req, res) => {
   try {
     const { message, source = 'test' } = req.body;
     
+    // Enhanced test scenarios
+    const testScenarios = {
+      meeting: "Meeting transcript: John said 'We need to fix the database performance issue before the client demo on Thursday. Sarah, can you handle the optimization? Also, we should schedule a follow-up with the marketing team about the Q4 campaign launch.'",
+      email: "Email from client: Budget approval needed for Q4 marketing campaign by Friday",
+      slack: "Slack message: @channel The production server is down! Need immediate assistance. Customer support is getting complaints.",
+      default: message
+    };
+
+    const testMessage = testScenarios[source] || testScenarios.default;
+    
     const testEvent = {
       source,
       type: 'manual_test',
-      data: { message },
+      data: { message: testMessage },
       timestamp: new Date(),
       priority: 3
     };
 
-    console.log('🧪 Testing AI with manual event...');
+    console.log(`🧪 Testing AI with ${source} scenario...`);
     const result = await aiProcessor.processEvent(testEvent);
     
     // Emit real-time updates if new tasks were created
@@ -223,7 +285,8 @@ app.post('/api/ai-test', async (req, res) => {
     res.json({
       success: true,
       message: 'AI analysis complete!',
-      result
+      result,
+      scenario: source
     });
   } catch (error) {
     console.error('AI test error:', error);
@@ -247,6 +310,14 @@ eventTypes.forEach(eventType => {
         const emailResult = await gmailService.getEmailContent(event.data.messageId);
         if (emailResult.success) {
           event.data.emailContent = emailResult.email;
+        }
+      }
+
+      // For Fireflies events, extract actionable content
+      if (eventType === 'fireflies:transcript' && event.data.transcriptId) {
+        const transcriptResult = await firefliesService.getTranscriptById(event.data.transcriptId);
+        if (transcriptResult.success) {
+          event.data.actionableContent = firefliesService.extractActionableContent(transcriptResult.transcript);
         }
       }
 
@@ -299,7 +370,7 @@ server.listen(PORT, async () => {
   console.log(`✅ AI Dashboard server running on port ${PORT}`);
   console.log(`📊 Dashboard: http://localhost:${PORT}`);
   console.log(`🔗 WebSocket server active for real-time updates`);
-  console.log(`🧪 Test AI: POST http://localhost:${PORT}/api/ai-test`);
+  console.log(`🧪 Test AI scenarios: POST http://localhost:${PORT}/api/ai-test`);
   
   await initializeServices();
 });
@@ -309,10 +380,9 @@ webhookMonitor.start(WEBHOOK_PORT);
 console.log('🎯 Ready for action! Try these:');
 console.log('1. Visit http://localhost:3002 to see the dashboard');
 console.log('2. Start frontend: cd frontend && npm start');
-console.log('3. Test AI with curl command or dashboard button');
-console.log('4. Check tasks: http://localhost:3002/api/tasks');
-console.log('5. View Notion pages: http://localhost:3002/api/notion/pages');
-console.log('6. View Gmail emails: http://localhost:3002/api/gmail/emails');
+console.log('3. Test AI scenarios: meeting, email, slack');
+console.log('4. Check integrations: /api/notion/pages, /api/fireflies/transcripts');
+console.log('5. Webhook endpoints: http://localhost:3001/webhooks/*');
 
 // Handle graceful shutdown
 process.on('SIGINT', () => {
