@@ -21,6 +21,10 @@ const Dashboard = () => {
   const [isAiTyping, setIsAiTyping] = useState(false);
   const [selectedAiModel, setSelectedAiModel] = useState('openai');
 
+  // Integration Setup
+  const [showIntegrationModal, setShowIntegrationModal] = useState(false);
+  const [selectedIntegration, setSelectedIntegration] = useState(null);
+
   useEffect(() => {
     // Connect to WebSocket
     const newSocket = io('http://localhost:3002');
@@ -184,8 +188,178 @@ const Dashboard = () => {
     }
   };
 
+  const openIntegrationSetup = (integration) => {
+    setSelectedIntegration(integration);
+    setShowIntegrationModal(true);
+  };
+
+  const IntegrationSetupModal = () => {
+    if (!showIntegrationModal || !selectedIntegration) return null;
+
+    const getSetupInstructions = (integrationName) => {
+      const instructions = {
+        Gmail: {
+          steps: [
+            "Go to Google Cloud Console",
+            "Create a new project or select existing",
+            "Enable Gmail API",
+            "Create credentials (OAuth 2.0)",
+            "Add your domain to authorized origins",
+            "Copy Client ID and Secret to .env file"
+          ],
+          envVars: [
+            "GOOGLE_CLIENT_ID=your_client_id",
+            "GOOGLE_CLIENT_SECRET=your_client_secret",
+            "GOOGLE_REFRESH_TOKEN=your_refresh_token"
+          ]
+        },
+        Slack: {
+          steps: [
+            "Go to api.slack.com/apps",
+            "Create a new Slack app",
+            "Add Bot Token Scopes: chat:write, channels:history",
+            "Install app to workspace",
+            "Copy Bot User OAuth Token"
+          ],
+          envVars: [
+            "SLACK_BOT_TOKEN=xoxb-your-token-here"
+          ]
+        },
+        Fireflies: {
+          steps: [
+            "Sign up at fireflies.ai",
+            "Go to Integrations > API",
+            "Generate API key",
+            "Copy the API key"
+          ],
+          envVars: [
+            "FIREFLIES_API_KEY=your_api_key_here"
+          ]
+        },
+        Calendar: {
+          steps: [
+            "Use same Google Cloud Console project as Gmail",
+            "Enable Google Calendar API",
+            "Use same OAuth credentials",
+            "Add calendar scopes to your app"
+          ],
+          envVars: [
+            "GOOGLE_CLIENT_ID=your_client_id",
+            "GOOGLE_CLIENT_SECRET=your_client_secret"
+          ]
+        },
+        Linear: {
+          steps: [
+            "Go to linear.app",
+            "Go to Settings > API",
+            "Create Personal API Key",
+            "Copy the API key"
+          ],
+          envVars: [
+            "LINEAR_API_KEY=your_api_key_here"
+          ]
+        },
+        GitHub: {
+          steps: [
+            "Go to GitHub Settings > Developer settings",
+            "Personal access tokens > Generate new token",
+            "Select scopes: repo, user, notifications",
+            "Copy the token"
+          ],
+          envVars: [
+            "GITHUB_TOKEN=your_personal_access_token"
+          ]
+        }
+      };
+
+      return instructions[integrationName] || {
+        steps: ["Setup instructions not available yet"],
+        envVars: ["Check documentation for environment variables"]
+      };
+    };
+
+    const instructions = getSetupInstructions(selectedIntegration.name);
+
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4 max-h-96 overflow-y-auto">
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-2xl font-bold flex items-center gap-2">
+              <span className="text-2xl">{selectedIntegration.icon}</span>
+              Setup {selectedIntegration.name}
+            </h2>
+            <button 
+              onClick={() => setShowIntegrationModal(false)}
+              className="text-gray-500 hover:text-gray-700 text-2xl"
+            >
+              ×
+            </button>
+          </div>
+
+          <div className="space-y-6">
+            <div>
+              <h3 className="font-bold text-lg mb-3">Setup Steps:</h3>
+              <ol className="list-decimal list-inside space-y-2">
+                {instructions.steps.map((step, i) => (
+                  <li key={i} className="text-gray-700">{step}</li>
+                ))}
+              </ol>
+            </div>
+
+            <div>
+              <h3 className="font-bold text-lg mb-3">Environment Variables:</h3>
+              <div className="bg-gray-100 p-3 rounded-lg">
+                <p className="text-sm text-gray-600 mb-2">Add these to your <code>backend/.env</code> file:</p>
+                <pre className="text-sm">
+                  {instructions.envVars.join('\n')}
+                </pre>
+              </div>
+            </div>
+
+            <div className="bg-blue-50 p-4 rounded-lg">
+              <p className="text-sm text-blue-800">
+                <strong>Note:</strong> After adding environment variables, restart your backend server with <code>npm start</code>
+              </p>
+            </div>
+
+            <div className="flex gap-3">
+              <button 
+                onClick={() => setShowIntegrationModal(false)}
+                className="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-800 py-2 px-4 rounded-lg transition-colors"
+              >
+                Close
+              </button>
+              <button 
+                onClick={() => {
+                  setShowIntegrationModal(false);
+                  loadApiStatus(); // Refresh status
+                }}
+                className="flex-1 bg-blue-500 hover:bg-blue-600 text-white py-2 px-4 rounded-lg transition-colors"
+              >
+                Test Connection
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const pendingTasks = tasks.filter(t => t.status === 'pending');
   const completedTasks = tasks.filter(t => t.status === 'completed');
+
+  // Integration data
+  const integrations = [
+    { name: 'OpenAI', status: 'connected', icon: '🤖', description: 'GPT-4 AI processing' },
+    { name: 'Claude', status: 'connected', icon: '🧠', description: 'Anthropic Claude AI' },
+    { name: 'Notion', status: apiStatus.notion?.success ? 'connected' : 'error', icon: '📝', description: 'Task management' },
+    { name: 'Gmail', status: apiStatus.gmail?.success ? 'connected' : 'error', icon: '📧', description: 'Email monitoring' },
+    { name: 'Slack', status: apiStatus.slack?.success ? 'connected' : 'error', icon: '💬', description: 'Team communication' },
+    { name: 'Fireflies', status: apiStatus.fireflies?.success ? 'connected' : 'error', icon: '🎙️', description: 'Meeting transcripts' },
+    { name: 'Calendar', status: 'disconnected', icon: '📅', description: 'Schedule management' },
+    { name: 'Linear', status: 'disconnected', icon: '📊', description: 'Issue tracking' },
+    { name: 'GitHub', status: 'disconnected', icon: '⚡', description: 'Code repository' }
+  ];
 
   return (
     <div className="min-h-screen bg-gray-100">
@@ -440,18 +614,13 @@ const Dashboard = () => {
         {/* Integrations Tab */}
         {activeTab === 'integrations' && (
           <div className="max-w-6xl mx-auto">
+            <div className="mb-6">
+              <h2 className="text-2xl font-bold mb-2">🔗 Service Integrations</h2>
+              <p className="text-gray-600">Connect your favorite tools to supercharge your AI organizer</p>
+            </div>
+            
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {[
-                { name: 'OpenAI', status: 'connected', icon: '🤖', description: 'GPT-4 AI processing' },
-                { name: 'Claude', status: 'connected', icon: '🧠', description: 'Anthropic Claude AI' },
-                { name: 'Notion', status: 'connected', icon: '📝', description: 'Task management' },
-                { name: 'Gmail', status: 'error', icon: '📧', description: 'Email monitoring' },
-                { name: 'Slack', status: 'error', icon: '💬', description: 'Team communication' },
-                { name: 'Fireflies', status: 'error', icon: '🎙️', description: 'Meeting transcripts' },
-                { name: 'Calendar', status: 'disconnected', icon: '📅', description: 'Schedule management' },
-                { name: 'Linear', status: 'disconnected', icon: '📊', description: 'Issue tracking' },
-                { name: 'GitHub', status: 'disconnected', icon: '⚡', description: 'Code repository' }
-              ].map(integration => (
+              {integrations.map(integration => (
                 <div key={integration.name} className="bg-white rounded-lg shadow-lg p-6">
                   <div className="flex items-center justify-between mb-4">
                     <div className="flex items-center gap-3">
@@ -475,12 +644,16 @@ const Dashboard = () => {
                      integration.status === 'error' ? '❌ Connection Error' : '⚪ Not Connected'}
                   </div>
                   
-                  <button className={`w-full py-2 px-4 rounded-lg font-medium transition-colors ${
-                    integration.status === 'connected' 
-                      ? 'bg-green-100 text-green-800 hover:bg-green-200'
-                      : 'bg-blue-500 text-white hover:bg-blue-600'
-                  }`}>
-                    {integration.status === 'connected' ? 'Configure' : 'Connect'}
+                  <button 
+                    onClick={() => integration.status === 'connected' ? 
+                      loadApiStatus() : openIntegrationSetup(integration)}
+                    className={`w-full py-2 px-4 rounded-lg font-medium transition-colors ${
+                      integration.status === 'connected' 
+                        ? 'bg-green-100 text-green-800 hover:bg-green-200'
+                        : 'bg-blue-500 text-white hover:bg-blue-600'
+                    }`}
+                  >
+                    {integration.status === 'connected' ? 'Test Connection' : 'Connect'}
                   </button>
                 </div>
               ))}
@@ -529,6 +702,9 @@ const Dashboard = () => {
           </div>
         )}
       </div>
+
+      {/* Integration Setup Modal */}
+      <IntegrationSetupModal />
     </div>
   );
 };
