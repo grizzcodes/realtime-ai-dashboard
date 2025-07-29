@@ -1,5 +1,6 @@
-// backend/src/ai/intelligentProcessor.js - Real AI with OpenAI & Claude
+// backend/src/ai/intelligentProcessor.js - Enhanced with Supabase persistence
 const axios = require('axios');
+const SupabaseService = require('../database/supabaseClient');
 
 class IntelligentEventProcessor {
   constructor() {
@@ -7,21 +8,71 @@ class IntelligentEventProcessor {
     this.tasks = new Map();
     this.openaiKey = process.env.OPENAI_API_KEY;
     this.claudeKey = process.env.ANTHROPIC_API_KEY;
+    this.db = new SupabaseService();
     
     console.log('🤖 AI Processor initialized with:');
     console.log(`   OpenAI: ${this.openaiKey ? '✅' : '❌'}`);
     console.log(`   Claude: ${this.claudeKey ? '✅' : '❌'}`);
+    console.log(`   Supabase: ${this.db.client ? '✅' : '❌ (memory mode)'}`);
+    
+    // Test database connection
+    this.initializeDatabase();
+  }
+
+  async initializeDatabase() {
+    const result = await this.db.testConnection();
+    if (result.success) {
+      console.log('📊 Database connection verified');
+      // Load existing tasks from database
+      await this.loadExistingTasks();
+    }
+  }
+
+  async loadExistingTasks() {
+    const result = await this.db.getTasks(50); // Load recent tasks
+    if (result.success) {
+      result.tasks.forEach(task => {
+        this.tasks.set(task.id, this.formatTaskFromDB(task));
+      });
+      console.log(`📋 Loaded ${result.tasks.length} existing tasks from database`);
+    }
+  }
+
+  formatTaskFromDB(dbTask) {
+    return {
+      id: dbTask.id,
+      title: dbTask.title,
+      source: dbTask.source,
+      urgency: dbTask.urgency,
+      category: dbTask.category,
+      summary: dbTask.summary,
+      keyPeople: dbTask.key_people || [],
+      tags: dbTask.tags || [],
+      deadline: dbTask.deadline ? new Date(dbTask.deadline) : null,
+      confidence: dbTask.confidence,
+      created: new Date(dbTask.created_at),
+      status: dbTask.status,
+      relatedEventId: dbTask.related_event_id,
+      aiGenerated: dbTask.ai_generated
+    };
   }
 
   async processEvent(event) {
     console.log(`🧠 AI analyzing: ${event.source} - ${event.type}`);
     
-    // Store event
-    this.events.push({
+    // Store event in memory and database
+    const eventWithId = {
       ...event,
       id: `event-${Date.now()}`,
       processed: new Date()
-    });
+    };
+    
+    this.events.push(eventWithId);
+    
+    // Save to database (non-blocking)
+    this.db.saveEvent(eventWithId).catch(err => 
+      console.error('Event save failed:', err.message)
+    );
 
     try {
       // Get AI analysis
@@ -33,7 +84,7 @@ class IntelligentEventProcessor {
       console.log(`✅ AI Analysis complete: ${analysis.urgency}/5 urgency, ${tasks.length} tasks created`);
       
       return {
-        event,
+        event: eventWithId,
         analysis,
         newTasks: tasks,
         allTasks: this.getTopTasks()
@@ -172,8 +223,14 @@ Be specific and actionable.`;
           aiGenerated: true
         };
         
+        // Store in memory
         this.tasks.set(task.id, task);
         tasks.push(task);
+        
+        // Save to database (non-blocking)
+        this.db.saveTask(task).catch(err => 
+          console.error('Task save failed:', err.message)
+        );
         
         console.log(`📋 Task created: "${task.title}" (urgency: ${task.urgency})`);
       }
@@ -198,6 +255,11 @@ Be specific and actionable.`;
     };
     
     this.tasks.set(task.id, task);
+    
+    // Save to database (non-blocking)
+    this.db.saveTask(task).catch(err => 
+      console.error('Fallback task save failed:', err.message)
+    );
     
     return {
       event,
@@ -229,7 +291,7 @@ Be specific and actionable.`;
     return this.tasks.get(taskId);
   }
 
-  updateTaskStatus(taskId, status) {
+  async updateTaskStatus(taskId, status) {
     const task = this.tasks.get(taskId);
     if (task) {
       task.status = status;
@@ -238,12 +300,26 @@ Be specific and actionable.`;
         task.completed = new Date();
       }
       this.tasks.set(taskId, task);
+      
+      // Update in database
+      const result = await this.db.updateTaskStatus(taskId, status);
+      if (!result.success) {
+        console.error('Failed to update task in database:', result.error);
+      }
+      
       return task;
     }
     return null;
   }
 
-  getStats() {
+  async getStats() {
+    // Try to get stats from database first
+    const dbStats = await this.db.getDashboardStats();
+    if (dbStats.success) {
+      return dbStats.stats;
+    }
+    
+    // Fallback to memory stats
     const allTasks = Array.from(this.tasks.values());
     return {
       totalEvents: this.events.length,
@@ -256,8 +332,20 @@ Be specific and actionable.`;
     };
   }
 
-  getRecentEvents(limit = 20) {
+  async getRecentEvents(limit = 20) {
+    // Try to get from database first
+    const dbEvents = await this.db.getRecentEvents(limit);
+    if (dbEvents.success) {
+      return dbEvents.events;
+    }
+    
+    // Fallback to memory
     return this.events.slice(-limit).reverse();
+  }
+
+  // Database connection helper
+  getDatabase() {
+    return this.db;
   }
 }
 
