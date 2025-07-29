@@ -203,3 +203,84 @@ app.post('/api/ai-test', async (req, res) => {
     });
   }
 });
+
+// Enhanced event processing with real-time updates
+const eventTypes = ['slack:message', 'gmail:new_email', 'notion:change', 'fireflies:transcript'];
+
+eventTypes.forEach(eventType => {
+  webhookMonitor.on(eventType, async (event) => {
+    console.log(`📨 Processing: ${eventType}`);
+    
+    try {
+      // AI analysis
+      const result = await aiProcessor.processEvent(event);
+      
+      // Emit real-time updates
+      io.emit('new_event', result.event);
+      
+      if (result.newTasks.length > 0) {
+        result.newTasks.forEach(task => {
+          io.emit('new_task', task);
+          console.log(`📡 Broadcasting new task: ${task.title}`);
+        });
+        
+        // Update stats
+        const stats = await aiProcessor.getStats();
+        io.emit('stats_update', stats);
+      }
+      
+      // Optionally sync high-priority tasks to Notion
+      if (result.newTasks.length > 0) {
+        for (const task of result.newTasks) {
+          if (task.urgency >= 4) { // High priority tasks
+            console.log(`📝 Syncing high-priority task to Notion: ${task.title}`);
+            await notionService.createTask(task.title, {
+              Status: { select: { name: 'Todo' } },
+              Priority: { select: { name: 'High' } },
+              Source: { rich_text: [{ text: { content: task.source } }] }
+            });
+          }
+        }
+      }
+      
+      console.log(`✅ Event processed: ${result.newTasks.length} tasks, urgency ${result.analysis.urgency}/5`);
+    } catch (error) {
+      console.error('❌ Processing error:', error.message);
+    }
+  });
+});
+
+// Mount webhook routes
+app.use('/webhooks', webhookMonitor.app);
+
+const PORT = process.env.PORT || 3002;
+const WEBHOOK_PORT = 3001;
+
+// Start servers
+server.listen(PORT, async () => {
+  console.log(`✅ AI Dashboard server running on port ${PORT}`);
+  console.log(`📊 Dashboard: http://localhost:${PORT}`);
+  console.log(`🔗 WebSocket server active for real-time updates`);
+  console.log(`🧪 Test AI: POST http://localhost:${PORT}/api/ai-test`);
+  
+  await initializeServices();
+});
+
+webhookMonitor.start(WEBHOOK_PORT);
+
+console.log('\n🎯 Ready for action! Try these:');
+console.log('1. Visit http://localhost:3002 to see the dashboard');
+console.log('2. Start frontend: cd frontend && npm start');
+console.log('3. Test AI with curl command or dashboard button');
+console.log('4. Check tasks: http://localhost:3002/api/tasks');
+console.log('5. View Notion pages: http://localhost:3002/api/notion/pages');
+
+// Handle graceful shutdown
+process.on('SIGINT', () => {
+  console.log('\n🛑 Shutting down gracefully...');
+  webhookMonitor.stop();
+  server.close(() => {
+    console.log('✅ Server stopped');
+    process.exit(0);
+  });
+});
