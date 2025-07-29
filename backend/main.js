@@ -198,8 +198,8 @@ app.listen(PORT, async () => {
 
 webhookMonitor.start(WEBHOOK_PORT);
 
-console.log('\\n🎯 Ready for action! Try these:');
+console.log('\n🎯 Ready for action! Try these:');
 console.log('1. Visit http://localhost:3002 to see the dashboard');
-console.log('2. Test AI: curl -X POST http://localhost:3002/api/ai-test -H \"Content-Type: application/json\" -d \\'{\\"message\\": \\"Urgent: Client meeting needs rescheduling!\\"}\\' ');
+console.log('2. Test AI with curl command (see docs)');
 console.log('3. Check tasks: http://localhost:3002/api/tasks');
 console.log('4. View Notion pages: http://localhost:3002/api/notion/pages');
