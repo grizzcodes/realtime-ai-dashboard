@@ -8,13 +8,13 @@ const App = () => {
   const [isConnected, setIsConnected] = useState(false);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [apiStatus, setApiStatus] = useState({});
+  const [currentUser, setCurrentUser] = useState('');
 
   useEffect(() => {
     const socket = io('http://localhost:3002');
     socket.on('connect', () => setIsConnected(true));
     socket.on('disconnect', () => setIsConnected(false));
     
-    // Load data
     loadTasks();
     loadApiStatus();
       
@@ -36,6 +36,7 @@ const App = () => {
       const response = await fetch('http://localhost:3002/health');
       const data = await response.json();
       setApiStatus(data.apiConnections || {});
+      setCurrentUser(data.user || 'unknown');
     } catch (error) {
       console.error('Failed to load API status:', error);
     }
@@ -50,9 +51,15 @@ const App = () => {
       });
       const result = await response.json();
       console.log('AI Test Result:', result);
-      loadTasks(); // Reload tasks after test
+      if (result.success) {
+        alert('✅ AI test successful! Check tasks tab.');
+        loadTasks();
+      } else {
+        alert(`❌ AI test failed: ${result.error}`);
+      }
     } catch (error) {
       console.error('AI test failed:', error);
+      alert(`❌ AI test failed: ${error.message}`);
     }
   };
 
@@ -62,19 +69,18 @@ const App = () => {
       const data = await response.json();
       
       if (data.success) {
-        alert(`✅ ${name} connection successful!`);
+        alert(`✅ ${name}: ${data.message || 'Connection successful!'}`);
       } else {
-        alert(`❌ ${name} failed: ${data.error}`);
+        alert(`❌ ${name}: ${data.error}`);
       }
       
-      loadApiStatus(); // Refresh status
+      loadApiStatus();
     } catch (error) {
-      alert(`❌ ${name} connection failed: ${error.message}`);
+      alert(`❌ ${name} test failed: ${error.message}`);
     }
   };
 
   const integrations = [
-    // AI Services (Featured at the top)
     { 
       name: 'OpenAI', 
       icon: '🤖', 
@@ -91,7 +97,6 @@ const App = () => {
       category: 'ai',
       priority: 1
     },
-    // Core Integrations
     { 
       name: 'Notion', 
       icon: '📝', 
@@ -124,7 +129,6 @@ const App = () => {
       category: 'productivity',
       priority: 2
     },
-    // Extended Integrations
     { 
       name: 'Fireflies', 
       icon: '🎙️', 
@@ -151,7 +155,6 @@ const App = () => {
     }
   ];
 
-  // Sort integrations by priority and status
   const sortedIntegrations = integrations.sort((a, b) => {
     if (a.priority !== b.priority) return a.priority - b.priority;
     if (a.status === 'connected' && b.status !== 'connected') return -1;
@@ -175,23 +178,13 @@ const App = () => {
     }
   };
 
-  const getCategoryIcon = (category) => {
-    switch (category) {
-      case 'ai': return '🤖';
-      case 'productivity': return '📋';
-      case 'communication': return '💬';
-      case 'meetings': return '🎙️';
-      case 'development': return '💻';
-      default: return '🔧';
-    }
-  };
-
   return (
     <div className="min-h-screen bg-gray-100">
       <div className="bg-white shadow p-4">
         <div className="flex justify-between items-center">
           <h1 className="text-3xl font-bold">🤖 Ultimate AI Organizer</h1>
-          <div className="flex gap-4">
+          <div className="flex gap-4 items-center">
+            <span className="text-sm text-gray-600">@{currentUser}</span>
             <span className={isConnected ? 'text-green-600' : 'text-red-600'}>
               {isConnected ? '🔗 Connected' : '❌ Disconnected'}
             </span>
@@ -253,7 +246,6 @@ const App = () => {
         
         {activeTab === 'integrations' && (
           <div className="space-y-6">
-            {/* AI Services Section */}
             <div>
               <h2 className="text-2xl font-bold mb-4 flex items-center gap-2">
                 <span>🤖</span>
@@ -302,7 +294,6 @@ const App = () => {
               </div>
             </div>
 
-            {/* Other Services */}
             <div>
               <h2 className="text-2xl font-bold mb-4 flex items-center gap-2">
                 <span>🔗</span>
@@ -344,50 +335,9 @@ const App = () => {
                           Setup OAuth
                         </a>
                       )}
-
-                      {integration.name === 'Notion' && !apiStatus.notion?.success && (
-                        <div className="text-xs text-gray-500 bg-gray-50 p-2 rounded">
-                          Add NOTION_API_KEY to your .env file
-                        </div>
-                      )}
-
-                      {integration.name === 'Slack' && !apiStatus.slack?.success && (
-                        <div className="text-xs text-gray-500 bg-gray-50 p-2 rounded">
-                          Add SLACK_BOT_TOKEN to your .env file
-                        </div>
-                      )}
-
-                      {integration.name === 'GitHub' && !apiStatus.github?.success && (
-                        <div className="text-xs text-gray-500 bg-gray-50 p-2 rounded">
-                          Add GITHUB_TOKEN to your .env file
-                        </div>
-                      )}
                     </div>
                   </div>
                 ))}
-              </div>
-            </div>
-
-            {/* Quick Setup Guide */}
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">
-              <h3 className="text-lg font-bold mb-3 text-blue-800">🚀 Quick Setup Guide</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-                <div>
-                  <h4 className="font-semibold text-blue-700 mb-2">AI Services</h4>
-                  <ul className="space-y-1 text-blue-600">
-                    <li>• Get OpenAI API key from platform.openai.com</li>
-                    <li>• Get Claude API key from console.anthropic.com</li>
-                    <li>• Add keys to backend/.env file</li>
-                  </ul>
-                </div>
-                <div>
-                  <h4 className="font-semibold text-blue-700 mb-2">Core Integrations</h4>
-                  <ul className="space-y-1 text-blue-600">
-                    <li>• Create integrations for each service</li>
-                    <li>• Add API keys to .env file</li>
-                    <li>• Use Test Connection to verify setup</li>
-                  </ul>
-                </div>
               </div>
             </div>
           </div>
