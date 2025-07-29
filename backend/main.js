@@ -130,3 +130,76 @@ app.put('/api/tasks/:taskId/status', async (req, res) => {
     res.status(404).json({ error: 'Task not found' });
   }
 });
+
+// Notion integration routes
+app.get('/api/notion/pages', async (req, res) => {
+  try {
+    const pages = await notionService.getRecentPages(10);
+    res.json({ pages });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/notion/databases', async (req, res) => {
+  try {
+    const databases = await notionService.getTaskDatabases();
+    res.json({ databases });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/notion/task', async (req, res) => {
+  try {
+    const { title, properties } = req.body;
+    const result = await notionService.createTask(title, properties);
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// AI Test endpoint
+app.post('/api/ai-test', async (req, res) => {
+  try {
+    const { message, source = 'test' } = req.body;
+    
+    const testEvent = {
+      source,
+      type: 'manual_test',
+      data: { message },
+      timestamp: new Date(),
+      priority: 3
+    };
+
+    console.log('🧪 Testing AI with manual event...');
+    const result = await aiProcessor.processEvent(testEvent);
+    
+    // Emit real-time updates if new tasks were created
+    if (result.newTasks.length > 0) {
+      result.newTasks.forEach(task => {
+        io.emit('new_task', task);
+      });
+      
+      // Update stats
+      const stats = await aiProcessor.getStats();
+      io.emit('stats_update', stats);
+    }
+    
+    // Emit the event to activity feed
+    io.emit('new_event', result.event);
+    
+    res.json({
+      success: true,
+      message: 'AI analysis complete!',
+      result
+    });
+  } catch (error) {
+    console.error('AI test error:', error);
+    res.status(500).json({ 
+      error: error.message,
+      suggestion: 'Check your OpenAI/Claude API keys in .env file'
+    });
+  }
+});
