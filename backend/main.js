@@ -8,6 +8,7 @@ const cors = require('cors');
 const RealTimeMonitor = require('./src/webhooks/webhookHandler');
 const IntelligentProcessor = require('./src/ai/intelligentProcessor');
 const NotionService = require('./src/services/notionService');
+const GmailService = require('./src/services/gmailService');
 
 console.log('🚀 Starting AI-Powered Real-time Dashboard...');
 
@@ -27,6 +28,7 @@ app.use(cors());
 const webhookMonitor = new RealTimeMonitor();
 const aiProcessor = new IntelligentProcessor();
 const notionService = new NotionService();
+const gmailService = new GmailService();
 
 // Socket.io connection handling
 io.on('connection', (socket) => {
@@ -46,6 +48,13 @@ async function initializeServices() {
     console.log('✅ Notion API connected');
   } else {
     console.log('❌ Notion API failed:', notionTest.error);
+  }
+
+  const gmailTest = await gmailService.testConnection();
+  if (gmailTest.success) {
+    console.log('✅ Gmail API connected');
+  } else {
+    console.log('❌ Gmail API failed:', gmailTest.error);
   }
   
   // Test database connection
@@ -68,6 +77,7 @@ app.get('/', (req, res) => {
     features: {
       ai: 'OpenAI & Claude analysis',
       notion: 'Task management integration',
+      gmail: 'Email monitoring',
       webhooks: 'Multi-service monitoring',
       realtime: 'Live event processing',
       database: 'Supabase persistence'
@@ -78,6 +88,7 @@ app.get('/', (req, res) => {
       tasks: '/api/tasks',
       events: '/api/events',
       notion: '/api/notion',
+      gmail: '/api/gmail',
       'ai-test': '/api/ai-test'
     }
   });
@@ -160,6 +171,25 @@ app.post('/api/notion/task', async (req, res) => {
   }
 });
 
+// Gmail integration routes
+app.get('/api/gmail/emails', async (req, res) => {
+  try {
+    const result = await gmailService.getRecentEmails(10);
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/gmail/email/:id', async (req, res) => {
+  try {
+    const result = await gmailService.getEmailContent(req.params.id);
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // AI Test endpoint
 app.post('/api/ai-test', async (req, res) => {
   try {
@@ -212,6 +242,14 @@ eventTypes.forEach(eventType => {
     console.log(`📨 Processing: ${eventType}`);
     
     try {
+      // For Gmail events, get full email content
+      if (eventType === 'gmail:new_email' && event.data.messageId) {
+        const emailResult = await gmailService.getEmailContent(event.data.messageId);
+        if (emailResult.success) {
+          event.data.emailContent = emailResult.email;
+        }
+      }
+
       // AI analysis
       const result = await aiProcessor.processEvent(event);
       
@@ -268,16 +306,17 @@ server.listen(PORT, async () => {
 
 webhookMonitor.start(WEBHOOK_PORT);
 
-console.log('\n🎯 Ready for action! Try these:');
+console.log('🎯 Ready for action! Try these:');
 console.log('1. Visit http://localhost:3002 to see the dashboard');
 console.log('2. Start frontend: cd frontend && npm start');
 console.log('3. Test AI with curl command or dashboard button');
 console.log('4. Check tasks: http://localhost:3002/api/tasks');
 console.log('5. View Notion pages: http://localhost:3002/api/notion/pages');
+console.log('6. View Gmail emails: http://localhost:3002/api/gmail/emails');
 
 // Handle graceful shutdown
 process.on('SIGINT', () => {
-  console.log('\n🛑 Shutting down gracefully...');
+  console.log('🛑 Shutting down gracefully...');
   webhookMonitor.stop();
   server.close(() => {
     console.log('✅ Server stopped');
