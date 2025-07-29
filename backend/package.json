@@ -19,6 +19,7 @@
     "winston": "^3.10.0",
     "uuid": "^9.0.0",
     "@notionhq/client": "^2.2.15",
+    "@supabase/supabase-js": "^2.39.7",
     "googleapis": "^126.0.1"
   },
   "devDependencies": {
