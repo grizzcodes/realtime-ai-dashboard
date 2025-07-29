@@ -49,7 +49,8 @@ const testApiConnections = async () => {
       });
       results.openai.success = response.ok;
       if (!response.ok) {
-        results.openai.error = 'API key invalid or quota exceeded';
+        const error = await response.json();
+        results.openai.error = error.error?.message || 'API key invalid';
       }
     } catch (error) {
       results.openai.error = error.message;
@@ -76,7 +77,8 @@ const testApiConnections = async () => {
       });
       results.claude.success = response.ok;
       if (!response.ok) {
-        results.claude.error = 'API key invalid or quota exceeded';
+        const error = await response.json();
+        results.claude.error = error.error?.message || 'API key invalid';
       }
     } catch (error) {
       results.claude.error = error.message;
@@ -85,12 +87,12 @@ const testApiConnections = async () => {
     results.claude.error = 'API key not configured';
   }
 
-  // Test other integrations
+  // Other integrations (simplified checks)
   results.notion.success = !!process.env.NOTION_API_KEY;
   results.notion.error = process.env.NOTION_API_KEY ? null : 'API key not configured';
 
   results.gmail.success = !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
-  results.gmail.error = (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) ? null : 'OAuth credentials not configured';
+  results.gmail.error = (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) ? null : 'OAuth not configured';
 
   results.slack.success = !!process.env.SLACK_BOT_TOKEN;
   results.slack.error = process.env.SLACK_BOT_TOKEN ? null : 'Bot token not configured';
@@ -99,7 +101,7 @@ const testApiConnections = async () => {
   results.fireflies.error = process.env.FIREFLIES_API_KEY ? null : 'API key not configured';
 
   results.calendar.success = !!process.env.GOOGLE_REFRESH_TOKEN;
-  results.calendar.error = process.env.GOOGLE_REFRESH_TOKEN ? null : 'OAuth refresh token not configured';
+  results.calendar.error = process.env.GOOGLE_REFRESH_TOKEN ? null : 'OAuth token not configured';
 
   results.linear.success = !!process.env.LINEAR_API_KEY;
   results.linear.error = process.env.LINEAR_API_KEY ? null : 'API key not configured';
@@ -121,6 +123,7 @@ app.get('/health', async (req, res) => {
       timestamp: new Date().toISOString(),
       server: 'realtime-ai-dashboard',
       version: '1.0.0',
+      user: process.env.USER || process.env.USERNAME || 'unknown',
       apiConnections,
       stats
     });
@@ -159,40 +162,22 @@ app.put('/api/tasks/:id/status', async (req, res) => {
     const updatedTask = await aiProcessor.updateTaskStatus(id, status);
     
     if (updatedTask) {
-      // Emit to all connected clients
       io.emit('taskUpdated', updatedTask);
-      
-      res.json({
-        success: true,
-        task: updatedTask
-      });
+      res.json({ success: true, task: updatedTask });
     } else {
-      res.status(404).json({
-        success: false,
-        error: 'Task not found'
-      });
+      res.status(404).json({ success: false, error: 'Task not found' });
     }
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
 app.get('/api/events', async (req, res) => {
   try {
     const events = await aiProcessor.getRecentEvents(30);
-    
-    res.json({
-      success: true,
-      events
-    });
+    res.json({ success: true, events });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
@@ -202,30 +187,18 @@ app.post('/api/ai-test', async (req, res) => {
       source: 'ai-test',
       type: 'manual_test',
       data: {
-        message: req.body.message || 'Test AI processing: Urgent - Fix the payment gateway bug by tomorrow morning. Critical issue affecting customers.',
+        message: req.body.message || 'Test AI processing: Urgent - Fix the payment gateway bug by tomorrow morning.',
         user: 'test-user'
       },
       timestamp: new Date().toISOString()
     };
 
-    console.log('🧪 Processing test event...');
     const result = await aiProcessor.processEvent(testEvent);
-    
-    // Emit to all connected clients
     io.emit('newTask', result);
-    io.emit('eventProcessed', result);
     
-    res.json({
-      success: true,
-      message: 'AI test completed successfully',
-      result
-    });
+    res.json({ success: true, message: 'AI test completed', result });
   } catch (error) {
-    console.error('AI test failed:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
@@ -245,13 +218,10 @@ app.get('/api/test/openai', async (req, res) => {
 
     if (response.ok) {
       const data = await response.json();
-      res.json({ 
-        success: true, 
-        message: 'OpenAI connection successful',
-        models: data.data?.length || 0
-      });
+      res.json({ success: true, message: `OpenAI connected! Found ${data.data?.length || 0} models` });
     } else {
-      res.json({ success: false, error: 'Invalid API key or quota exceeded' });
+      const error = await response.json();
+      res.json({ success: false, error: error.error?.message || 'Invalid API key' });
     }
   } catch (error) {
     res.json({ success: false, error: error.message });
@@ -279,20 +249,18 @@ app.get('/api/test/claude', async (req, res) => {
     });
 
     if (response.ok) {
-      res.json({ 
-        success: true, 
-        message: 'Claude connection successful'
-      });
+      res.json({ success: true, message: 'Claude API connected successfully!' });
     } else {
-      res.json({ success: false, error: 'Invalid API key or quota exceeded' });
+      const error = await response.json();
+      res.json({ success: false, error: error.error?.message || 'Invalid API key' });
     }
   } catch (error) {
     res.json({ success: false, error: error.message });
   }
 });
 
-// Add test endpoints for other services
-const serviceTests = {
+// Simple test endpoints for other services
+const simpleTests = {
   notion: () => ({ 
     success: !!process.env.NOTION_API_KEY, 
     error: process.env.NOTION_API_KEY ? null : 'API key not configured' 
@@ -303,7 +271,7 @@ const serviceTests = {
   }),
   gmail: () => ({ 
     success: !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET), 
-    error: (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) ? null : 'OAuth credentials not configured' 
+    error: (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) ? null : 'OAuth not configured' 
   }),
   fireflies: () => ({ 
     success: !!process.env.FIREFLIES_API_KEY, 
@@ -323,56 +291,37 @@ const serviceTests = {
   })
 };
 
-Object.keys(serviceTests).forEach(service => {
+Object.keys(simpleTests).forEach(service => {
   app.get(`/api/test/${service}`, (req, res) => {
-    res.json(serviceTests[service]());
+    const result = simpleTests[service]();
+    res.json(result.success ? 
+      { success: true, message: `${service} configuration found` } : 
+      result
+    );
   });
 });
 
 // WebSocket connection handling
 io.on('connection', (socket) => {
   console.log('📱 Client connected:', socket.id);
-  
-  socket.on('disconnect', () => {
-    console.log('📱 Client disconnected:', socket.id);
-  });
-  
-  // Send initial data to new clients
-  socket.emit('connected', {
-    message: 'Connected to AI Dashboard',
-    timestamp: new Date().toISOString()
-  });
+  socket.on('disconnect', () => console.log('📱 Client disconnected:', socket.id));
+  socket.emit('connected', { message: 'Connected to AI Dashboard', timestamp: new Date().toISOString() });
 });
 
-// Global error handler
+// Error handlers
 app.use((error, req, res, next) => {
   console.error('❌ Server error:', error);
-  res.status(500).json({
-    success: false,
-    error: 'Internal server error',
-    message: error.message
-  });
+  res.status(500).json({ success: false, error: 'Internal server error' });
 });
 
-// 404 handler
 app.use((req, res) => {
-  res.status(404).json({
-    success: false,
-    error: 'Endpoint not found',
-    path: req.path
-  });
+  res.status(404).json({ success: false, error: 'Endpoint not found' });
 });
 
 const PORT = process.env.PORT || 3002;
-
 server.listen(PORT, () => {
-  console.log(`
-🚀 AI Dashboard Server Running!
-🌐 Server: http://localhost:${PORT}
-🔌 WebSocket: ws://localhost:${PORT}
-📊 Health: http://localhost:${PORT}/health
-🧠 AI APIs: ${process.env.OPENAI_API_KEY ? '✅ OpenAI' : '❌ OpenAI'} ${process.env.ANTHROPIC_API_KEY ? '✅ Claude' : '❌ Claude'}
-  `);
+  console.log(`🚀 Server: http://localhost:${PORT}`);
+  console.log(`🧠 AI: ${process.env.OPENAI_API_KEY ? '✅ OpenAI' : '❌ OpenAI'} ${process.env.ANTHROPIC_API_KEY ? '✅ Claude' : '❌ Claude'}`);
 });
 
 module.exports = { app, server, io };
