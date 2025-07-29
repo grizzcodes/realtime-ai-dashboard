@@ -92,3 +92,41 @@ app.get('/health', async (req, res) => {
     stats
   });
 });
+
+// API Routes
+app.get('/api/tasks', async (req, res) => {
+  const stats = await aiProcessor.getStats();
+  res.json({
+    tasks: aiProcessor.getTopTasks(20),
+    stats,
+    timestamp: new Date()
+  });
+});
+
+app.get('/api/events', async (req, res) => {
+  const events = await aiProcessor.getRecentEvents(30);
+  const stats = await aiProcessor.getStats();
+  res.json({
+    events,
+    stats,
+    timestamp: new Date()
+  });
+});
+
+app.put('/api/tasks/:taskId/status', async (req, res) => {
+  const { status } = req.body;
+  const task = await aiProcessor.updateTaskStatus(req.params.taskId, status);
+  
+  if (task) {
+    // Emit real-time update
+    io.emit('task_updated', task);
+    
+    // Update stats
+    const stats = await aiProcessor.getStats();
+    io.emit('stats_update', stats);
+    
+    res.json({ success: true, task });
+  } else {
+    res.status(404).json({ error: 'Task not found' });
+  }
+});
