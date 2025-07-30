@@ -183,22 +183,41 @@ app.get('/api/events', async (req, res) => {
 
 app.post('/api/ai-test', async (req, res) => {
   try {
+    console.log('🧪 AI Test requested...');
+    
     const testEvent = {
-      source: 'ai-test',
-      type: 'manual_test',
+      source: 'notion',
+      type: 'page_update',
       data: {
-        message: req.body.message || 'Test AI processing: Urgent - Fix the payment gateway bug by tomorrow morning.',
-        user: 'test-user'
+        message: req.body.message || 'URGENT: Complete Q4 budget planning in Notion by Friday. Need to finalize department allocations and get CFO approval.',
+        user: 'test-user',
+        page_title: 'Q4 Budget Planning',
+        database: 'Project Tasks'
       },
       timestamp: new Date().toISOString()
     };
 
+    console.log('Processing test event:', testEvent);
     const result = await aiProcessor.processEvent(testEvent);
-    io.emit('newTask', result);
+    console.log('AI processing result:', result);
     
-    res.json({ success: true, message: 'AI test completed', result });
+    // Emit to all connected clients
+    io.emit('newTask', result);
+    io.emit('eventProcessed', result);
+    
+    res.json({
+      success: true,
+      message: 'AI test completed successfully',
+      tasksCreated: result.newTasks.length,
+      result
+    });
   } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+    console.error('❌ AI test failed:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      stack: error.stack
+    });
   }
 });
 
