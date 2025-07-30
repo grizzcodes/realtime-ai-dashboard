@@ -10,6 +10,7 @@ const App = () => {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [apiStatus, setApiStatus] = useState({});
   const [currentUser, setCurrentUser] = useState('');
+  const [statusOptions, setStatusOptions] = useState([]);
   
   // Task filters
   const [filters, setFilters] = useState({
@@ -33,6 +34,16 @@ const App = () => {
       }
     });
     
+    // Listen for Notion sync with status options
+    socket.on('notionSync', (result) => {
+      if (result.tasks) {
+        setTasks(result.tasks);
+      }
+      if (result.statusOptions) {
+        setStatusOptions(result.statusOptions);
+      }
+    });
+    
     loadTasks();
     loadApiStatus();
       
@@ -49,6 +60,7 @@ const App = () => {
       const response = await fetch('http://localhost:3001/api/tasks');
       const data = await response.json();
       setTasks(data.tasks || []);
+      setStatusOptions(data.statusOptions || []);
     } catch (error) {
       console.error('Failed to load tasks:', error);
     }
@@ -87,23 +99,9 @@ const App = () => {
     }
 
     if (filters.status !== 'all') {
-      // Handle both internal status values and raw Notion status values
       filtered = filtered.filter(task => {
-        const taskStatus = task.status;
         const rawStatus = task.rawStatus?.toLowerCase() || '';
-        
-        switch (filters.status) {
-          case 'not_done_yet':
-            return rawStatus === 'not done yet' || taskStatus === 'pending';
-          case 'pending':
-            return taskStatus === 'pending';
-          case 'completed':
-            return taskStatus === 'completed';
-          case 'in_progress':
-            return taskStatus === 'in_progress';
-          default:
-            return taskStatus === filters.status;
-        }
+        return rawStatus === filters.status.toLowerCase();
       });
     }
 
@@ -181,7 +179,8 @@ const App = () => {
       
       if (data.success) {
         alert(`✅ Notion sync complete! Found ${data.tasksImported} tasks.`);
-        loadTasks();
+        setTasks(data.tasks || []);
+        setStatusOptions(data.statusOptions || []);
       } else {
         alert(`❌ Notion sync failed: ${data.error}`);
       }
@@ -226,17 +225,19 @@ const App = () => {
     }
   };
 
-  const getStatusDisplay = (task) => {
-    // Show the raw Notion status if available, otherwise show mapped status
-    if (task.rawStatus) {
-      return task.rawStatus;
-    }
-    
-    switch (task.status) {
-      case 'pending': return 'Not Done Yet';
-      case 'in_progress': return 'In Progress';
-      case 'completed': return 'Done';
-      default: return task.status;
+  const getStatusColorClass = (statusColor) => {
+    // Map Notion colors to Tailwind classes
+    switch (statusColor) {
+      case 'blue': return 'bg-blue-100 text-blue-800 border-blue-200';
+      case 'red': return 'bg-red-100 text-red-800 border-red-200';
+      case 'purple': return 'bg-purple-100 text-purple-800 border-purple-200';
+      case 'green': return 'bg-green-100 text-green-800 border-green-200';
+      case 'yellow': return 'bg-yellow-100 text-yellow-800 border-yellow-200';
+      case 'orange': return 'bg-orange-100 text-orange-800 border-orange-200';
+      case 'pink': return 'bg-pink-100 text-pink-800 border-pink-200';
+      case 'brown': return 'bg-amber-100 text-amber-800 border-amber-200';
+      case 'gray': return 'bg-gray-100 text-gray-800 border-gray-200';
+      default: return 'bg-gray-100 text-gray-800 border-gray-200';
     }
   };
 
@@ -426,10 +427,11 @@ const App = () => {
                   className="px-2 py-1 border rounded text-sm"
                 >
                   <option value="all">All Status</option>
-                  <option value="not_done_yet">Not Done Yet</option>
-                  <option value="in_progress">In Progress</option>
-                  <option value="completed">Done</option>
-                  <option value="pending">Pending</option>
+                  {statusOptions.map(option => (
+                    <option key={option.name} value={option.name}>
+                      {option.name}
+                    </option>
+                  ))}
                 </select>
                 <input
                   type="date"
@@ -444,6 +446,13 @@ const App = () => {
                   className="px-2 py-1 border rounded text-sm"
                 />
               </div>
+
+              {/* Status Options Debug Info */}
+              {statusOptions.length > 0 && (
+                <div className="mb-4 p-2 bg-blue-50 rounded text-xs">
+                  <strong>Available Status Groups:</strong> {statusOptions.map(opt => `${opt.name} (${opt.color})`).join(', ')}
+                </div>
+              )}
 
               {/* Tasks List */}
               {filteredTasks.length === 0 ? (
@@ -473,7 +482,9 @@ const App = () => {
                       <div className="text-sm text-gray-600 space-y-1">
                         <div className="flex gap-4">
                           <span className="font-medium">Status:</span>
-                          <span className="capitalize">{getStatusDisplay(task)}</span>
+                          <span className={`px-2 py-1 rounded border text-xs ${getStatusColorClass(task.statusColor)}`}>
+                            {task.rawStatus}
+                          </span>
                         </div>
                         <div className="flex gap-4">
                           <span className="font-medium">Source:</span>
