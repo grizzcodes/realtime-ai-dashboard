@@ -85,14 +85,24 @@ class NotionService {
       // Parse all tasks first
       const allTasks = response.results.map(page => this.parseNotionPage(page, dbInfo.properties));
       
-      // Filter for active tasks in code
+      // Log all unique statuses for debugging
+      const allStatuses = [...new Set(allTasks.map(t => t.rawStatus))];
+      console.log('📊 All task statuses found:', allStatuses.join(', '));
+      
+      // Filter for ONLY "Not Done Yet" and "In Progress" tasks
       const activeTasks = allTasks.filter(task => {
         const status = task.rawStatus?.toLowerCase() || '';
-        return status === 'not done yet' || status === 'in progress' || status === 'todo' || status === 'pending';
+        const isActive = status === 'not done yet' || status === 'in progress';
+        
+        if (!isActive) {
+          console.log(`🚫 Filtering out task "${task.title}" with status "${task.rawStatus}"`);
+        }
+        
+        return isActive;
       });
       
       console.log(`✅ ${activeTasks.length} active tasks after filtering (from ${allTasks.length} total)`);
-      console.log('📊 Task statuses found:', [...new Set(allTasks.map(t => t.rawStatus))].join(', '));
+      console.log('✅ Active task statuses:', [...new Set(activeTasks.map(t => t.rawStatus))].join(', '));
       
       return { success: true, tasks: activeTasks, databaseId: this.databaseId };
     } catch (error) {
@@ -162,6 +172,9 @@ class NotionService {
     const assignedUsers = Array.isArray(assigned) ? assigned : [];
     const primaryAssignee = assignedUsers.length > 0 ? assignedUsers[0].name : 'Unassigned';
     const allAssignees = assignedUsers.map(user => user.name);
+
+    // Debug log for this specific task
+    console.log(`📋 Task: "${taskName}" | Status: "${status}" | Assigned: ${primaryAssignee}`);
 
     return {
       id: `notion-${page.id}`,
