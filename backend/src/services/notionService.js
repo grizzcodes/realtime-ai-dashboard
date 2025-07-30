@@ -34,13 +34,21 @@ class NotionService {
     try {
       console.log(`📝 Querying Notion database: ${this.databaseId}`);
       
-      // First, verify database access
+      // First, get database info to understand property types
+      let dbInfo;
       try {
-        const dbInfo = await this.notion.databases.retrieve({
+        dbInfo = await this.notion.databases.retrieve({
           database_id: this.databaseId
         });
         console.log(`✅ Database found: "${dbInfo.title[0]?.plain_text || 'Untitled'}"`);
         console.log(`🔗 Properties: ${Object.keys(dbInfo.properties).join(', ')}`);
+        
+        // Log property types for debugging
+        console.log('📋 Property types:');
+        Object.entries(dbInfo.properties).forEach(([name, prop]) => {
+          console.log(`  - ${name}: ${prop.type}`);
+        });
+        
       } catch (dbError) {
         console.error('❌ Database access error:', dbError.message);
         if (dbError.code === 'object_not_found') {
@@ -52,51 +60,41 @@ class NotionService {
         throw dbError;
       }
       
-      // Query with filter for active tasks only
+      // Query without filters first to get all data, then filter in code
+      console.log('📋 Querying all tasks (will filter after)...');
       const response = await this.notion.databases.query({
         database_id: this.databaseId,
-        filter: {
-          or: [
-            {
-              property: 'Status',
-              select: {
-                equals: 'Not Done Yet'
-              }
-            },
-            {
-              property: 'Status',
-              select: {
-                equals: 'In Progress'
-              }
-            }
-          ]
-        },
         sorts: [
           {
             property: 'Priority',
-            direction: 'ascending'
-          },
-          {
-            property: 'Due',
             direction: 'ascending'
           }
         ]
       });
 
-      console.log(`📋 Found ${response.results.length} active tasks in Notion (filtered for Not Done Yet + In Progress)`);
+      console.log(`📋 Found ${response.results.length} total pages in Notion`);
       
       if (response.results.length === 0) {
         return { 
           success: true, 
           tasks: [], 
-          message: 'No active tasks found - all tasks are completed or database is empty!'
+          message: 'Database is empty - add some tasks to your Notion database!'
         };
       }
 
-      const tasks = response.results.map(page => this.parseNotionPage(page));
-      console.log(`✅ Parsed ${tasks.length} tasks successfully`);
+      // Parse all tasks first
+      const allTasks = response.results.map(page => this.parseNotionPage(page, dbInfo.properties));
       
-      return { success: true, tasks: tasks, databaseId: this.databaseId };
+      // Filter for active tasks in code
+      const activeTasks = allTasks.filter(task => {
+        const status = task.rawStatus?.toLowerCase() || '';
+        return status === 'not done yet' || status === 'in progress' || status === 'todo' || status === 'pending';
+      });
+      
+      console.log(`✅ ${activeTasks.length} active tasks after filtering (from ${allTasks.length} total)`);
+      console.log('📊 Task statuses found:', [...new Set(allTasks.map(t => t.rawStatus))].join(', '));
+      
+      return { success: true, tasks: activeTasks, databaseId: this.databaseId };
     } catch (error) {
       console.error('❌ Notion API error:', error);
       return { 
@@ -106,8 +104,8 @@ class NotionService {
     }
   }
 
-  parseNotionPage(page) {
-    const properties = page.properties;
+  parseNotionPage(page, properties = {}) {
+    const pageProps = page.properties;
     
     const getPropertyValue = (prop) => {
       if (!prop) return null;
@@ -135,20 +133,30 @@ class NotionService {
           return prop.checkbox || false;
         case 'url':
           return prop.url || null;
+        case 'formula':
+          return prop.formula?.string || prop.formula?.number || null;
+        case 'rollup':
+          return prop.rollup?.array || prop.rollup?.number || null;
         default:
+          console.log(`⚠️ Unknown property type: ${prop.type} for property`);
           return null;
       }
     };
 
-    // Map your actual Notion properties
-    const taskName = getPropertyValue(properties['Task name']) || 'Untitled Task';
-    const status = getPropertyValue(properties['Status']) || 'Not Done Yet';
-    const assigned = getPropertyValue(properties['Assigned']) || [];
-    const dueDate = getPropertyValue(properties['Due']);
-    const priority = getPropertyValue(properties['Priority']);
-    const brandProject = getPropertyValue(properties['Brand/Projects']) || [];
-    const type = getPropertyValue(properties['Type']);
-    const links = getPropertyValue(properties['Links']);
+    // Map your actual Notion properties with fallbacks
+    const taskName = getPropertyValue(pageProps['Task name']) || 
+                     getPropertyValue(pageProps['Name']) || 
+                     getPropertyValue(pageProps['Title']) || 
+                     'Untitled Task';
+    
+    const status = getPropertyValue(pageProps['Status']) || 'Not Done Yet';
+    const assigned = getPropertyValue(pageProps['Assigned']) || [];
+    const dueDate = getPropertyValue(pageProps['Due']);
+    const priority = getPropertyValue(pageProps['Priority']);
+    const brandProject = getPropertyValue(pageProps['Brand/Projects']) || 
+                        getPropertyValue(pageProps['Project']) || [];
+    const type = getPropertyValue(pageProps['Type']);
+    const links = getPropertyValue(pageProps['Links']);
 
     // Extract assignee info
     const assignedUsers = Array.isArray(assigned) ? assigned : [];
@@ -160,6 +168,7 @@ class NotionService {
       notionId: page.id,
       title: taskName,
       status: this.mapNotionStatusToOurs(status),
+      rawStatus: status, // Keep original for filtering
       assignee: primaryAssignee,
       assignedUsers: assignedUsers, // Full user objects with IDs
       keyPeople: allAssignees,
@@ -188,12 +197,18 @@ class NotionService {
     switch (notionStatus.toLowerCase()) {
       case 'done':
       case 'completed':
+      case 'complete':
         return 'completed';
       case 'in progress':
+      case 'in-progress':
+      case 'doing':
+      case 'working':
         return 'in_progress';
       case 'not done yet':
       case 'not started':
       case 'todo':
+      case 'pending':
+      case 'new':
       default:
         return 'pending';
     }
@@ -206,10 +221,15 @@ class NotionService {
       case 'urgent':
       case 'critical':
       case 'high':
+      case '5':
+      case '4':
         return 5;
       case 'medium':
+      case '3':
         return 3;
       case 'low':
+      case '2':
+      case '1':
         return 2;
       default:
         return 3;
