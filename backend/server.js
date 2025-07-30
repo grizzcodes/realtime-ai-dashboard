@@ -4,6 +4,7 @@ const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
 const cors = require('cors');
+const fetch = require('node-fetch');
 
 const app = express();
 const server = http.createServer(app);
@@ -29,16 +30,99 @@ console.log('🚀 Starting Realtime AI Dashboard Backend...');
 // Socket handling
 io.on('connection', (socket) => {
   console.log('👤 User connected:', socket.id);
+  
+  // Handle AI chat messages
+  socket.on('aiChat', async (data) => {
+    try {
+      const { message, provider, action } = data;
+      
+      if (action === 'modify_platform') {
+        // Handle platform modifications
+        const response = await handlePlatformModification(message, provider);
+        socket.emit('aiResponse', { response, type: 'modification' });
+      } else {
+        // Regular chat
+        const response = await getAIResponse(message, provider);
+        socket.emit('aiResponse', { response, type: 'chat' });
+      }
+    } catch (error) {
+      socket.emit('aiError', { error: error.message });
+    }
+  });
+  
   socket.on('disconnect', () => {
     console.log('👋 User disconnected:', socket.id);
   });
 });
 
-// OAuth Routes
+// AI Response Handler
+async function getAIResponse(message, provider) {
+  const systemPrompt = `You are an AI assistant for the Realtime AI Dashboard. You can help users manage integrations, understand platform features, and provide real-time assistance. Be concise and helpful.`;
+  
+  if (provider === 'openai' && process.env.OPENAI_API_KEY) {
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: 'gpt-4',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: message }
+        ],
+        max_tokens: 500
+      })
+    });
+    const data = await response.json();
+    return data.choices[0].message.content;
+  }
+  
+  if (provider === 'claude' && process.env.ANTHROPIC_API_KEY) {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': process.env.ANTHROPIC_API_KEY,
+        'Content-Type': 'application/json',
+        'anthropic-version': '2023-06-01'
+      },
+      body: JSON.stringify({
+        model: 'claude-3-sonnet-20240229',
+        max_tokens: 500,
+        messages: [{ role: 'user', content: `${systemPrompt}\n\nUser: ${message}` }]
+      })
+    });
+    const data = await response.json();
+    return data.content[0].text;
+  }
+  
+  return "AI service not configured. Please add API keys to use the chatbot.";
+}
+
+// Platform Modification Handler
+async function handlePlatformModification(message, provider) {
+  const modificationPrompt = `You are an admin AI that can suggest platform modifications. Analyze this request and provide specific suggestions: "${message}"`;
+  
+  // Get AI suggestion
+  const suggestion = await getAIResponse(modificationPrompt, provider);
+  
+  // Return structured response
+  return {
+    suggestion,
+    actions: [
+      { type: 'refresh_integrations', label: 'Refresh Integration Status' },
+      { type: 'test_all', label: 'Test All Connections' },
+      { type: 'reload_tasks', label: 'Reload Tasks' }
+    ]
+  };
+}
+
+// OAuth Routes (fix for calendar)
 app.get('/auth/google', (req, res) => {
   const scopes = [
     'https://www.googleapis.com/auth/gmail.readonly',
-    'https://www.googleapis.com/auth/calendar',
+    'https://www.googleapis.com/auth/calendar.readonly',
     'https://www.googleapis.com/auth/userinfo.email'
   ];
 
@@ -132,11 +216,10 @@ async function checkIntegrationStatus() {
   return status;
 }
 
-// Health endpoint
+// API Routes
 app.get('/api/health', async (req, res) => {
   try {
     const apiConnections = await checkIntegrationStatus();
-    
     res.json({ 
       status: 'healthy', 
       timestamp: new Date().toISOString(),
@@ -153,7 +236,6 @@ app.get('/api/health', async (req, res) => {
   }
 });
 
-// Test integration endpoints
 app.get('/api/test/:integration', async (req, res) => {
   const integration = req.params.integration.toLowerCase();
   
@@ -196,7 +278,6 @@ app.get('/api/test/:integration', async (req, res) => {
   }
 });
 
-// Get tasks endpoint
 app.get('/api/tasks', async (req, res) => {
   try {
     const notionResult = await notionService.getTasks();
@@ -227,7 +308,6 @@ app.get('/api/tasks', async (req, res) => {
   }
 });
 
-// AI test endpoint
 app.post('/api/ai-test', async (req, res) => {
   try {
     res.json({
@@ -241,6 +321,33 @@ app.post('/api/ai-test', async (req, res) => {
       success: false,
       error: error.message
     });
+  }
+});
+
+// Platform action endpoints
+app.post('/api/admin/refresh-integrations', async (req, res) => {
+  try {
+    const status = await checkIntegrationStatus();
+    io.emit('integrationUpdate', status);
+    res.json({ success: true, message: 'Integrations refreshed' });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.post('/api/admin/test-all', async (req, res) => {
+  try {
+    const status = await checkIntegrationStatus();
+    const connected = Object.values(status).filter(s => s.success).length;
+    const total = Object.keys(status).length;
+    
+    res.json({ 
+      success: true, 
+      message: `${connected}/${total} integrations working`,
+      status 
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
