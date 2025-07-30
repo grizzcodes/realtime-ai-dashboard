@@ -205,26 +205,6 @@ const App = () => {
     }
   };
 
-  const getUrgencyColor = (urgency) => {
-    switch (urgency) {
-      case 5: return 'bg-red-500';
-      case 4: return 'bg-orange-500';
-      case 3: return 'bg-yellow-500';
-      case 2: return 'bg-blue-500';
-      default: return 'bg-gray-500';
-    }
-  };
-
-  const getUrgencyText = (urgency) => {
-    switch (urgency) {
-      case 5: return 'Critical';
-      case 4: return 'High';
-      case 3: return 'Medium';
-      case 2: return 'Low';
-      default: return 'Normal';
-    }
-  };
-
   const getStatusColorClass = (statusColor) => {
     // Map Notion colors to Tailwind classes
     switch (statusColor) {
@@ -447,13 +427,6 @@ const App = () => {
                 />
               </div>
 
-              {/* Status Options Debug Info */}
-              {statusOptions.length > 0 && (
-                <div className="mb-4 p-2 bg-blue-50 rounded text-xs">
-                  <strong>Available Status Groups:</strong> {statusOptions.map(opt => `${opt.name} (${opt.color})`).join(', ')}
-                </div>
-              )}
-
               {/* Tasks List */}
               {filteredTasks.length === 0 ? (
                 <p className="text-gray-500">No tasks match your filters. Click Sync Notion to load your tasks!</p>
@@ -463,20 +436,7 @@ const App = () => {
                     <div key={task.id} className="border rounded-lg p-4 hover:shadow-md transition-shadow">
                       <div className="flex justify-between items-start mb-2">
                         <h4 className="font-medium text-lg">{task.title}</h4>
-                        <div className="flex items-center gap-2">
-                          <span className={`text-xs px-2 py-1 rounded text-white ${getUrgencyColor(task.urgency)}`}>
-                            {getUrgencyText(task.urgency)}
-                          </span>
-                          {task.status === 'pending' && (
-                            <button
-                              onClick={() => markTaskComplete(task.id)}
-                              className="text-green-600 hover:bg-green-100 p-1 rounded"
-                              title="Mark Complete"
-                            >
-                              ✓
-                            </button>
-                          )}
-                        </div>
+                        {/* Removed the red critical button here */}
                       </div>
                       
                       <div className="text-sm text-gray-600 space-y-1">
