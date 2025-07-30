@@ -27,40 +27,33 @@ class NotionService {
       return { success: false, error: 'Notion not configured' };
     }
 
-    try {
-      // If no specific database ID, try to find a tasks database
-      let databaseId = this.databaseId;
-      
-      if (!databaseId) {
-        const databases = await this.notion.search({
-          filter: { property: 'object', value: 'database' },
-          query: 'tasks'
-        });
-        
-        if (databases.results.length > 0) {
-          databaseId = databases.results[0].id;
-        } else {
-          return { success: false, error: 'No tasks database found. Please set NOTION_DATABASE_ID in .env' };
-        }
-      }
+    if (!this.databaseId) {
+      return { success: false, error: 'NOTION_DATABASE_ID not set in .env file' };
+    }
 
+    try {
+      console.log(`📝 Querying Notion database: ${this.databaseId}`);
+      
       const response = await this.notion.databases.query({
-        database_id: databaseId,
-        filter: {
-          and: [
-            {
-              property: 'Status',
-              select: {
-                does_not_equal: 'Done'
-              }
-            }
-          ]
-        }
+        database_id: this.databaseId,
+        sorts: [
+          {
+            property: 'Due date',
+            direction: 'ascending'
+          }
+        ]
       });
 
+      console.log(`📋 Found ${response.results.length} pages in Notion`);
       const tasks = response.results.map(page => this.parseNotionPage(page));
-      return { success: true, tasks, databaseId };
+      
+      // Filter out tasks that are "Done"
+      const activeTasks = tasks.filter(task => task.status !== 'Done');
+      console.log(`✅ ${activeTasks.length} active tasks after filtering`);
+      
+      return { success: true, tasks: activeTasks, databaseId: this.databaseId };
     } catch (error) {
+      console.error('❌ Notion API error:', error);
       return { success: false, error: error.message };
     }
   }
@@ -68,7 +61,7 @@ class NotionService {
   parseNotionPage(page) {
     const properties = page.properties;
     
-    // Extract common properties (adjust based on your Notion setup)
+    // Extract properties based on your database structure
     const getPropertyValue = (prop) => {
       if (!prop) return null;
       
@@ -87,28 +80,53 @@ class NotionService {
           return prop.people?.map(person => person.name || person.id) || [];
         case 'number':
           return prop.number || null;
+        case 'checkbox':
+          return prop.checkbox || false;
         default:
           return null;
       }
     };
 
+    // Map your Notion properties to our task structure
+    const taskName = getPropertyValue(properties['Task']) || 'Untitled Task';
+    const status = getPropertyValue(properties['Status']) || 'Not done yet';
+    const person = getPropertyValue(properties['Person']) || [];
+    const dueDate = getPropertyValue(properties['Due date']);
+    const priority = getPropertyValue(properties['Priority']);
+
     return {
       id: `notion-${page.id}`,
       notionId: page.id,
-      title: getPropertyValue(properties.Name) || getPropertyValue(properties.Title) || 'Untitled',
-      status: getPropertyValue(properties.Status) || 'pending',
-      assignee: getPropertyValue(properties.Assignee) || getPropertyValue(properties.Person),
-      project: getPropertyValue(properties.Project) || getPropertyValue(properties.Category),
-      urgency: this.mapNotionPriorityToUrgency(getPropertyValue(properties.Priority)),
-      keyPeople: getPropertyValue(properties.Assignee) ? [getPropertyValue(properties.Assignee)] : [],
-      tags: getPropertyValue(properties.Tags) || [],
-      deadline: getPropertyValue(properties.Deadline) || getPropertyValue(properties.Due),
+      title: taskName,
+      status: this.mapNotionStatusToOurs(status),
+      assignee: Array.isArray(person) ? person[0] : person,
+      keyPeople: Array.isArray(person) ? person : (person ? [person] : []),
+      project: 'Notion Tasks', // Since this appears to be a general task database
+      urgency: this.mapNotionPriorityToUrgency(priority),
+      deadline: dueDate ? new Date(dueDate) : null,
+      tags: ['notion'],
       created: new Date(page.created_time),
       updated: new Date(page.last_edited_time),
       source: 'notion',
       notionUrl: page.url,
-      aiGenerated: false
+      aiGenerated: false,
+      category: 'task'
     };
+  }
+
+  mapNotionStatusToOurs(notionStatus) {
+    if (!notionStatus) return 'pending';
+    
+    switch (notionStatus.toLowerCase()) {
+      case 'done':
+        return 'completed';
+      case 'in progress':
+        return 'in_progress';
+      case 'not done yet':
+      case 'daily task':
+      default:
+        return 'pending';
+    }
   }
 
   mapNotionPriorityToUrgency(priority) {
@@ -118,7 +136,7 @@ class NotionService {
       case 'urgent':
       case 'high':
       case '🔴':
-        return 4;
+        return 5;
       case 'medium':
       case '🟡':
         return 3;
@@ -137,7 +155,7 @@ class NotionService {
 
     try {
       const properties = {
-        Name: {
+        'Task': {
           title: [
             {
               text: {
@@ -148,17 +166,19 @@ class NotionService {
         }
       };
 
-      // Add optional properties if they exist
+      // Add status
       if (task.status) {
-        properties.Status = {
+        const notionStatus = this.mapOurStatusToNotion(task.status);
+        properties['Status'] = {
           select: {
-            name: task.status === 'pending' ? 'To Do' : task.status
+            name: notionStatus
           }
         };
       }
 
+      // Add person if specified
       if (task.assignee) {
-        properties.Assignee = {
+        properties['Person'] = {
           rich_text: [
             {
               text: {
@@ -169,10 +189,21 @@ class NotionService {
         };
       }
 
+      // Add due date if specified
       if (task.deadline) {
-        properties.Deadline = {
+        properties['Due date'] = {
           date: {
-            start: task.deadline
+            start: task.deadline instanceof Date ? task.deadline.toISOString().split('T')[0] : task.deadline
+          }
+        };
+      }
+
+      // Add priority based on urgency
+      if (task.urgency) {
+        const priority = this.mapUrgencyToNotionPriority(task.urgency);
+        properties['Priority'] = {
+          select: {
+            name: priority
           }
         };
       }
@@ -186,6 +217,60 @@ class NotionService {
 
       return { success: true, page: response };
     } catch (error) {
+      console.error('❌ Failed to create Notion task:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  mapOurStatusToNotion(status) {
+    switch (status) {
+      case 'completed':
+        return 'Done';
+      case 'in_progress':
+        return 'In progress';
+      case 'pending':
+      default:
+        return 'Not done yet';
+    }
+  }
+
+  mapUrgencyToNotionPriority(urgency) {
+    switch (urgency) {
+      case 5:
+        return 'High';
+      case 4:
+        return 'High';
+      case 3:
+        return 'Medium';
+      case 2:
+      case 1:
+      default:
+        return 'Low';
+    }
+  }
+
+  async updateTaskStatus(notionId, status) {
+    if (!this.notion) {
+      return { success: false, error: 'Notion not configured' };
+    }
+
+    try {
+      const notionStatus = this.mapOurStatusToNotion(status);
+      
+      const response = await this.notion.pages.update({
+        page_id: notionId,
+        properties: {
+          'Status': {
+            select: {
+              name: notionStatus
+            }
+          }
+        }
+      });
+
+      return { success: true, page: response };
+    } catch (error) {
+      console.error('❌ Failed to update Notion task:', error);
       return { success: false, error: error.message };
     }
   }
