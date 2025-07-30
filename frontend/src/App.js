@@ -131,6 +131,13 @@ const App = () => {
     });
   };
 
+  const clearTasks = () => {
+    setTasks([]);
+    setFilteredTasks([]);
+    setStatusOptions([]);
+    console.log('🗑️ Tasks cleared from frontend');
+  };
+
   const testAI = async () => {
     try {
       const response = await fetch('http://localhost:3001/api/ai-test', {
@@ -171,6 +178,7 @@ const App = () => {
 
   const syncWithNotion = async () => {
     try {
+      console.log('🔄 Starting fresh Notion sync...');
       const response = await fetch('http://localhost:3001/api/notion/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' }
@@ -178,6 +186,7 @@ const App = () => {
       const data = await response.json();
       
       if (data.success) {
+        console.log('✅ Fresh sync completed:', data.tasksImported, 'tasks');
         alert(`✅ Notion sync complete! Found ${data.tasksImported} tasks.`);
         setTasks(data.tasks || []);
         setStatusOptions(data.statusOptions || []);
@@ -370,6 +379,12 @@ const App = () => {
                   >
                     Clear Filters
                   </button>
+                  <button 
+                    onClick={clearTasks}
+                    className="bg-red-500 text-white px-3 py-1 rounded text-sm hover:bg-red-600"
+                  >
+                    🗑️ Clear Tasks
+                  </button>
                 </div>
               </div>
 
@@ -429,14 +444,27 @@ const App = () => {
 
               {/* Tasks List */}
               {filteredTasks.length === 0 ? (
-                <p className="text-gray-500">No tasks match your filters. Click Sync Notion to load your tasks!</p>
+                <div className="text-center py-8">
+                  <p className="text-gray-500 mb-4">
+                    {tasks.length === 0 
+                      ? "No tasks loaded. Click 'Sync Notion' to load your tasks!" 
+                      : "No tasks match your filters. Try clearing filters or adjusting your search."}
+                  </p>
+                  {tasks.length === 0 && apiStatus.notion?.success && (
+                    <button 
+                      onClick={syncWithNotion}
+                      className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
+                    >
+                      📝 Load Tasks from Notion
+                    </button>
+                  )}
+                </div>
               ) : (
                 <div className="space-y-3 max-h-96 overflow-y-auto">
                   {filteredTasks.map(task => (
                     <div key={task.id} className="border rounded-lg p-4 hover:shadow-md transition-shadow">
                       <div className="flex justify-between items-start mb-2">
                         <h4 className="font-medium text-lg">{task.title}</h4>
-                        {/* Removed the red critical button here */}
                       </div>
                       
                       <div className="text-sm text-gray-600 space-y-1">
