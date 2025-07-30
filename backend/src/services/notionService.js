@@ -28,7 +28,7 @@ class NotionService {
     }
 
     if (!this.databaseId) {
-      return { success: false, error: 'Database ID not set - add NOTION_DATABASE_ID=4edf1722-ef48-4cbc-988d-ed170d281f9b to .env' };
+      return { success: false, error: 'Database ID not set - add NOTION_DATABASE_ID=4edf1722-ef48-4cbc-988d-ed770d281f9b to .env' };
     }
 
     try {
@@ -52,27 +52,51 @@ class NotionService {
         throw dbError;
       }
       
+      // Query with filter for active tasks only
       const response = await this.notion.databases.query({
-        database_id: this.databaseId
+        database_id: this.databaseId,
+        filter: {
+          or: [
+            {
+              property: 'Status',
+              select: {
+                equals: 'Not Done Yet'
+              }
+            },
+            {
+              property: 'Status',
+              select: {
+                equals: 'In Progress'
+              }
+            }
+          ]
+        },
+        sorts: [
+          {
+            property: 'Priority',
+            direction: 'ascending'
+          },
+          {
+            property: 'Due',
+            direction: 'ascending'
+          }
+        ]
       });
 
-      console.log(`📋 Found ${response.results.length} pages in Notion`);
+      console.log(`📋 Found ${response.results.length} active tasks in Notion (filtered for Not Done Yet + In Progress)`);
       
       if (response.results.length === 0) {
         return { 
           success: true, 
           tasks: [], 
-          message: 'Database is empty - add some tasks to your Notion database!'
+          message: 'No active tasks found - all tasks are completed or database is empty!'
         };
       }
 
       const tasks = response.results.map(page => this.parseNotionPage(page));
+      console.log(`✅ Parsed ${tasks.length} tasks successfully`);
       
-      // Filter out completed tasks
-      const activeTasks = tasks.filter(task => task.status !== 'completed');
-      console.log(`✅ ${activeTasks.length} active tasks after filtering`);
-      
-      return { success: true, tasks: activeTasks, databaseId: this.databaseId };
+      return { success: true, tasks: tasks, databaseId: this.databaseId };
     } catch (error) {
       console.error('❌ Notion API error:', error);
       return { 
@@ -100,34 +124,55 @@ class NotionService {
         case 'date':
           return prop.date?.start || null;
         case 'people':
-          return prop.people?.map(person => person.name || person.id) || [];
+          return prop.people?.map(person => ({
+            id: person.id,
+            name: person.name || 'Unknown User',
+            avatar_url: person.avatar_url || null
+          })) || [];
         case 'number':
           return prop.number || null;
         case 'checkbox':
           return prop.checkbox || false;
+        case 'url':
+          return prop.url || null;
         default:
           return null;
       }
     };
 
-    // Map your Notion properties
-    const taskName = getPropertyValue(properties['Task']) || 'Untitled Task';
-    const status = getPropertyValue(properties['Status']) || 'Not done yet';
-    const person = getPropertyValue(properties['Person']) || [];
-    const dueDate = getPropertyValue(properties['Due date']);
+    // Map your actual Notion properties
+    const taskName = getPropertyValue(properties['Task name']) || 'Untitled Task';
+    const status = getPropertyValue(properties['Status']) || 'Not Done Yet';
+    const assigned = getPropertyValue(properties['Assigned']) || [];
+    const dueDate = getPropertyValue(properties['Due']);
     const priority = getPropertyValue(properties['Priority']);
+    const brandProject = getPropertyValue(properties['Brand/Projects']) || [];
+    const type = getPropertyValue(properties['Type']);
+    const links = getPropertyValue(properties['Links']);
+
+    // Extract assignee info
+    const assignedUsers = Array.isArray(assigned) ? assigned : [];
+    const primaryAssignee = assignedUsers.length > 0 ? assignedUsers[0].name : 'Unassigned';
+    const allAssignees = assignedUsers.map(user => user.name);
 
     return {
       id: `notion-${page.id}`,
       notionId: page.id,
       title: taskName,
       status: this.mapNotionStatusToOurs(status),
-      assignee: Array.isArray(person) ? person[0] : person,
-      keyPeople: Array.isArray(person) ? person : (person ? [person] : []),
-      project: 'Notion Tasks',
+      assignee: primaryAssignee,
+      assignedUsers: assignedUsers, // Full user objects with IDs
+      keyPeople: allAssignees,
+      project: Array.isArray(brandProject) ? brandProject.join(', ') : (brandProject || 'General'),
       urgency: this.mapNotionPriorityToUrgency(priority),
       deadline: dueDate ? new Date(dueDate) : null,
-      tags: ['notion'],
+      type: type || 'Task',
+      links: links,
+      tags: [
+        'notion',
+        ...(Array.isArray(brandProject) ? brandProject : (brandProject ? [brandProject] : [])),
+        ...(type ? [type] : [])
+      ],
       created: new Date(page.created_time),
       updated: new Date(page.last_edited_time),
       source: 'notion',
@@ -142,21 +187,24 @@ class NotionService {
     
     switch (notionStatus.toLowerCase()) {
       case 'done':
+      case 'completed':
         return 'completed';
       case 'in progress':
         return 'in_progress';
       case 'not done yet':
-      case 'daily task':
+      case 'not started':
+      case 'todo':
       default:
         return 'pending';
     }
   }
 
   mapNotionPriorityToUrgency(priority) {
-    if (!priority) return 2;
+    if (!priority) return 3; // Default to medium
     
     switch (priority.toLowerCase()) {
       case 'urgent':
+      case 'critical':
       case 'high':
         return 5;
       case 'medium':
@@ -164,7 +212,7 @@ class NotionService {
       case 'low':
         return 2;
       default:
-        return 2;
+        return 3;
     }
   }
 
@@ -199,10 +247,10 @@ class NotionService {
       case 'completed':
         return 'Done';
       case 'in_progress':
-        return 'In progress';
+        return 'In Progress';
       case 'pending':
       default:
-        return 'Not done yet';
+        return 'Not Done Yet';
     }
   }
 }
