@@ -422,18 +422,6 @@ const App = () => {
 
               {/* Filters */}
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-4 p-3 bg-gray-50 rounded">
-                <select
-                  value={filters.assignee}
-                  onChange={(e) => setFilters({...filters, assignee: e.target.value})}
-                  className="px-2 py-1 border rounded text-sm"
-                >
-                  <option value="">All Assignees</option>
-                  {availableAssignees.map(assignee => (
-                    <option key={assignee} value={assignee}>
-                      👤 {assignee}
-                    </option>
-                  ))}
-                </select>
                 <input
                   type="text"
                   placeholder="Project"
@@ -452,6 +440,18 @@ const App = () => {
                   <option value="3">Medium</option>
                   <option value="2">Low</option>
                   <option value="1">Normal</option>
+                </select>
+                <select
+                  value={filters.assignee}
+                  onChange={(e) => setFilters({...filters, assignee: e.target.value})}
+                  className="px-2 py-1 border rounded text-sm"
+                >
+                  <option value="">All People</option>
+                  {availableAssignees.map(assignee => (
+                    <option key={assignee} value={assignee}>
+                      👤 {assignee}
+                    </option>
+                  ))}
                 </select>
                 <select
                   value={filters.status}
@@ -555,19 +555,6 @@ const App = () => {
                           <div className="flex gap-4">
                             <span className="font-medium">Project:</span>
                             <span>{task.project}</span>
-                          </div>
-                        )}
-                        
-                        {task.tags && task.tags.length > 0 && (
-                          <div className="flex gap-4">
-                            <span className="font-medium">Tags:</span>
-                            <div className="flex gap-1 flex-wrap">
-                              {task.tags.map(tag => (
-                                <span key={tag} className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs">
-                                  #{tag}
-                                </span>
-                              ))}
-                            </div>
                           </div>
                         )}
                         
