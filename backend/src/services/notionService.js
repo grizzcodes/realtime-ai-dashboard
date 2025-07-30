@@ -1,199 +1,192 @@
-// backend/src/services/notionService.js - Notion API integration
+// backend/src/services/notionService.js
 const { Client } = require('@notionhq/client');
 
 class NotionService {
   constructor() {
-    this.notion = new Client({
+    this.notion = process.env.NOTION_API_KEY ? new Client({
       auth: process.env.NOTION_API_KEY,
-    });
-    console.log('📝 Notion service initialized');
+    }) : null;
+    this.databaseId = process.env.NOTION_DATABASE_ID || null;
   }
 
   async testConnection() {
+    if (!this.notion) {
+      return { success: false, error: 'Notion API key not configured' };
+    }
+
     try {
       const response = await this.notion.users.me();
-      console.log('✅ Notion connection successful:', response.name);
       return { success: true, user: response };
     } catch (error) {
-      console.error('❌ Notion connection failed:', error.message);
       return { success: false, error: error.message };
     }
   }
 
-  async getRecentPages(limit = 10) {
+  async getTasks() {
+    if (!this.notion) {
+      return { success: false, error: 'Notion not configured' };
+    }
+
     try {
-      const response = await this.notion.search({
-        query: '',
-        page_size: limit,
+      // If no specific database ID, try to find a tasks database
+      let databaseId = this.databaseId;
+      
+      if (!databaseId) {
+        const databases = await this.notion.search({
+          filter: { property: 'object', value: 'database' },
+          query: 'tasks'
+        });
+        
+        if (databases.results.length > 0) {
+          databaseId = databases.results[0].id;
+        } else {
+          return { success: false, error: 'No tasks database found. Please set NOTION_DATABASE_ID in .env' };
+        }
+      }
+
+      const response = await this.notion.databases.query({
+        database_id: databaseId,
         filter: {
-          value: 'page',
-          property: 'object'
-        },
-        sort: {
-          direction: 'descending',
-          timestamp: 'last_edited_time'
+          and: [
+            {
+              property: 'Status',
+              select: {
+                does_not_equal: 'Done'
+              }
+            }
+          ]
         }
       });
 
-      return response.results.map(page => ({
-        id: page.id,
-        title: this.extractTitle(page),
-        lastEdited: page.last_edited_time,
-        url: page.url,
-        properties: page.properties
-      }));
+      const tasks = response.results.map(page => this.parseNotionPage(page));
+      return { success: true, tasks, databaseId };
     } catch (error) {
-      console.error('Error fetching recent pages:', error);
-      return [];
+      return { success: false, error: error.message };
     }
   }
 
-  async getTaskDatabases() {
-    try {
-      const response = await this.notion.search({
-        query: 'tasks',
-        filter: {
-          value: 'database',
-          property: 'object'
-        }
-      });
+  parseNotionPage(page) {
+    const properties = page.properties;
+    
+    // Extract common properties (adjust based on your Notion setup)
+    const getPropertyValue = (prop) => {
+      if (!prop) return null;
+      
+      switch (prop.type) {
+        case 'title':
+          return prop.title?.[0]?.plain_text || '';
+        case 'rich_text':
+          return prop.rich_text?.[0]?.plain_text || '';
+        case 'select':
+          return prop.select?.name || null;
+        case 'multi_select':
+          return prop.multi_select?.map(item => item.name) || [];
+        case 'date':
+          return prop.date?.start || null;
+        case 'people':
+          return prop.people?.map(person => person.name || person.id) || [];
+        case 'number':
+          return prop.number || null;
+        default:
+          return null;
+      }
+    };
 
-      return response.results.map(db => ({
-        id: db.id,
-        title: this.extractTitle(db),
-        url: db.url,
-        properties: Object.keys(db.properties)
-      }));
-    } catch (error) {
-      console.error('Error fetching task databases:', error);
-      return [];
+    return {
+      id: `notion-${page.id}`,
+      notionId: page.id,
+      title: getPropertyValue(properties.Name) || getPropertyValue(properties.Title) || 'Untitled',
+      status: getPropertyValue(properties.Status) || 'pending',
+      assignee: getPropertyValue(properties.Assignee) || getPropertyValue(properties.Person),
+      project: getPropertyValue(properties.Project) || getPropertyValue(properties.Category),
+      urgency: this.mapNotionPriorityToUrgency(getPropertyValue(properties.Priority)),
+      keyPeople: getPropertyValue(properties.Assignee) ? [getPropertyValue(properties.Assignee)] : [],
+      tags: getPropertyValue(properties.Tags) || [],
+      deadline: getPropertyValue(properties.Deadline) || getPropertyValue(properties.Due),
+      created: new Date(page.created_time),
+      updated: new Date(page.last_edited_time),
+      source: 'notion',
+      notionUrl: page.url,
+      aiGenerated: false
+    };
+  }
+
+  mapNotionPriorityToUrgency(priority) {
+    if (!priority) return 2;
+    
+    switch (priority.toLowerCase()) {
+      case 'urgent':
+      case 'high':
+      case '🔴':
+        return 4;
+      case 'medium':
+      case '🟡':
+        return 3;
+      case 'low':
+      case '🟢':
+        return 2;
+      default:
+        return 2;
     }
   }
 
-  async createTask(title, properties = {}) {
+  async createTask(task) {
+    if (!this.notion || !this.databaseId) {
+      return { success: false, error: 'Notion not properly configured' };
+    }
+
     try {
-      // Try to find a suitable database first
-      const databases = await this.getTaskDatabases();
-      let targetDatabase = databases.find(db => 
-        db.title.toLowerCase().includes('task') || 
-        db.title.toLowerCase().includes('todo')
-      );
-
-      if (!targetDatabase && databases.length > 0) {
-        targetDatabase = databases[0]; // Use first available database
-      }
-
-      if (!targetDatabase) {
-        throw new Error('No suitable database found for task creation');
-      }
-
-      const taskProperties = {
+      const properties = {
         Name: {
           title: [
             {
               text: {
-                content: title
+                content: task.title
               }
             }
           ]
-        },
-        ...properties
+        }
       };
+
+      // Add optional properties if they exist
+      if (task.status) {
+        properties.Status = {
+          select: {
+            name: task.status === 'pending' ? 'To Do' : task.status
+          }
+        };
+      }
+
+      if (task.assignee) {
+        properties.Assignee = {
+          rich_text: [
+            {
+              text: {
+                content: task.assignee
+              }
+            }
+          ]
+        };
+      }
+
+      if (task.deadline) {
+        properties.Deadline = {
+          date: {
+            start: task.deadline
+          }
+        };
+      }
 
       const response = await this.notion.pages.create({
         parent: {
-          database_id: targetDatabase.id
+          database_id: this.databaseId
         },
-        properties: taskProperties
+        properties
       });
 
-      console.log(`✅ Task created in Notion: "${title}"`);
-      return {
-        success: true,
-        page: response,
-        id: response.id,
-        url: response.url
-      };
-    } catch (error) {
-      console.error('Error creating task:', error);
-      return {
-        success: false,
-        error: error.message
-      };
-    }
-  }
-
-  async updateTaskStatus(pageId, status) {
-    try {
-      const response = await this.notion.pages.update({
-        page_id: pageId,
-        properties: {
-          Status: {
-            select: {
-              name: status
-            }
-          }
-        }
-      });
-
-      console.log(`✅ Task status updated: ${status}`);
       return { success: true, page: response };
     } catch (error) {
-      console.error('Error updating task status:', error);
       return { success: false, error: error.message };
-    }
-  }
-
-  extractTitle(page) {
-    if (page.properties?.Name?.title?.length > 0) {
-      return page.properties.Name.title[0].text.content;
-    }
-    if (page.properties?.Title?.title?.length > 0) {
-      return page.properties.Title.title[0].text.content;
-    }
-    return 'Untitled';
-  }
-
-  async searchPages(query) {
-    try {
-      const response = await this.notion.search({
-        query: query,
-        page_size: 20
-      });
-
-      return response.results.map(page => ({
-        id: page.id,
-        title: this.extractTitle(page),
-        type: page.object,
-        lastEdited: page.last_edited_time,
-        url: page.url
-      }));
-    } catch (error) {
-      console.error('Error searching pages:', error);
-      return [];
-    }
-  }
-
-  async getPageContent(pageId) {
-    try {
-      const page = await this.notion.pages.retrieve({ page_id: pageId });
-      const blocks = await this.notion.blocks.children.list({
-        block_id: pageId,
-        page_size: 50
-      });
-
-      return {
-        page: {
-          id: page.id,
-          title: this.extractTitle(page),
-          properties: page.properties,
-          lastEdited: page.last_edited_time
-        },
-        content: blocks.results
-      };
-    } catch (error) {
-      console.error('Error getting page content:', error);
-      return null;
     }
   }
 }
