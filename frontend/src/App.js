@@ -2,21 +2,223 @@ import React, { useState, useEffect } from 'react';
 import io from 'socket.io-client';
 import './App.css';
 
+// AI Chatbox Component
+const AIChatbox = ({ socket, apiStatus }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState('');
+  const [provider, setProvider] = useState('openai');
+  const [isTyping, setIsTyping] = useState(false);
+
+  useEffect(() => {
+    if (socket) {
+      socket.on('aiResponse', (data) => {
+        setIsTyping(false);
+        setMessages(prev => [...prev, { 
+          type: 'ai', 
+          text: typeof data.response === 'string' ? data.response : data.response.suggestion,
+          actions: data.response.actions || []
+        }]);
+      });
+
+      socket.on('aiError', (data) => {
+        setIsTyping(false);
+        setMessages(prev => [...prev, { type: 'error', text: data.error }]);
+      });
+    }
+    return () => {
+      if (socket) {
+        socket.off('aiResponse');
+        socket.off('aiError');
+      }
+    };
+  }, [socket]);
+
+  const sendMessage = () => {
+    if (!input.trim()) return;
+    
+    setMessages(prev => [...prev, { type: 'user', text: input }]);
+    setIsTyping(true);
+    
+    const isModification = input.toLowerCase().includes('modify') || 
+                          input.toLowerCase().includes('change') || 
+                          input.toLowerCase().includes('update') ||
+                          input.toLowerCase().includes('admin');
+    
+    socket.emit('aiChat', {
+      message: input,
+      provider,
+      action: isModification ? 'modify_platform' : 'chat'
+    });
+    
+    setInput('');
+  };
+
+  const executeAction = async (action) => {
+    try {
+      const response = await fetch(`http://localhost:3002/api/admin/${action.type.replace('_', '-')}`, {
+        method: 'POST'
+      });
+      const data = await response.json();
+      
+      setMessages(prev => [...prev, { 
+        type: 'system', 
+        text: `✅ ${data.message || 'Action completed'}` 
+      }]);
+      
+      if (action.type === 'refresh_integrations') {
+        window.location.reload();
+      }
+    } catch (error) {
+      setMessages(prev => [...prev, { 
+        type: 'error', 
+        text: `❌ Failed to execute action: ${error.message}` 
+      }]);
+    }
+  };
+
+  if (!isOpen) {
+    return (
+      <div className="fixed bottom-6 right-6 z-50">
+        <button
+          onClick={() => setIsOpen(true)}
+          className="bg-gradient-to-r from-purple-500 to-blue-500 text-white p-4 rounded-full shadow-lg hover:shadow-xl transition-all duration-300 animate-pulse"
+        >
+          <span className="text-2xl">🤖</span>
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="fixed bottom-6 right-6 w-96 h-96 bg-white rounded-lg shadow-2xl border z-50 flex flex-col">
+      <div className="bg-gradient-to-r from-purple-500 to-blue-500 text-white p-4 rounded-t-lg flex justify-between items-center">
+        <div>
+          <h3 className="font-bold">AI Assistant</h3>
+          <div className="flex gap-2 mt-1">
+            <button
+              onClick={() => setProvider('openai')}
+              className={`px-2 py-1 text-xs rounded ${provider === 'openai' ? 'bg-white/20' : 'bg-white/10'}`}
+            >
+              GPT-4
+            </button>
+            <button
+              onClick={() => setProvider('claude')}
+              className={`px-2 py-1 text-xs rounded ${provider === 'claude' ? 'bg-white/20' : 'bg-white/10'}`}
+            >
+              Claude
+            </button>
+          </div>
+        </div>
+        <button
+          onClick={() => setIsOpen(false)}
+          className="text-white/80 hover:text-white"
+        >
+          ✕
+        </button>
+      </div>
+
+      <div className="flex-1 p-4 overflow-y-auto space-y-3">
+        {messages.length === 0 && (
+          <div className="text-gray-500 text-sm">
+            👋 Hi! I'm your AI admin assistant. I can help manage your platform, test integrations, and provide insights.
+          </div>
+        )}
+        
+        {messages.map((msg, i) => (
+          <div key={i} className={`${msg.type === 'user' ? 'text-right' : 'text-left'}`}>
+            <div className={`inline-block max-w-[80%] p-2 rounded-lg text-sm ${
+              msg.type === 'user' 
+                ? 'bg-blue-500 text-white' 
+                : msg.type === 'error'
+                ? 'bg-red-100 text-red-800'
+                : msg.type === 'system'
+                ? 'bg-green-100 text-green-800'
+                : 'bg-gray-100 text-gray-800'
+            }`}>
+              {msg.text}
+            </div>
+            
+            {msg.actions && msg.actions.length > 0 && (
+              <div className="mt-2 space-y-1">
+                {msg.actions.map((action, j) => (
+                  <button
+                    key={j}
+                    onClick={() => executeAction(action)}
+                    className="block w-full text-left px-3 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs rounded border"
+                  >
+                    {action.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+        
+        {isTyping && (
+          <div className="text-left">
+            <div className="inline-block bg-gray-100 text-gray-800 p-2 rounded-lg text-sm">
+              <div className="flex space-x-1">
+                <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
+                <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '0.1s'}}></div>
+                <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></div>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="p-4 border-t">
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
+            placeholder="Ask about integrations, request modifications..."
+            className="flex-1 px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+            disabled={!apiStatus.openai?.success && !apiStatus.claude?.success}
+          />
+          <button
+            onClick={sendMessage}
+            disabled={!input.trim() || isTyping || (!apiStatus.openai?.success && !apiStatus.claude?.success)}
+            className="px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+          >
+            Send
+          </button>
+        </div>
+        {!apiStatus.openai?.success && !apiStatus.claude?.success && (
+          <div className="text-xs text-red-500 mt-1">
+            Add AI API keys to enable chatbot
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 const App = () => {
   const [tasks, setTasks] = useState([]);
   const [isConnected, setIsConnected] = useState(false);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [apiStatus, setApiStatus] = useState({});
+  const [socket, setSocket] = useState(null);
 
   useEffect(() => {
-    const socket = io('http://localhost:3002');
-    socket.on('connect', () => setIsConnected(true));
-    socket.on('disconnect', () => setIsConnected(false));
+    const newSocket = io('http://localhost:3002');
+    setSocket(newSocket);
+    
+    newSocket.on('connect', () => setIsConnected(true));
+    newSocket.on('disconnect', () => setIsConnected(false));
+    
+    newSocket.on('integrationUpdate', (status) => {
+      setApiStatus(status);
+    });
     
     loadTasks();
     loadApiStatus();
       
-    return () => socket.close();
+    return () => newSocket.close();
   }, []);
 
   const loadTasks = async () => {
@@ -206,7 +408,6 @@ const App = () => {
         
         {activeTab === 'integrations' && (
           <div className="space-y-6">
-            {/* AI Services Section */}
             <div className="bg-white rounded-lg shadow p-6">
               <h2 className="text-2xl font-bold mb-4">🤖 AI Services</h2>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -238,7 +439,6 @@ const App = () => {
               </div>
             </div>
 
-            {/* Other Services */}
             <div className="bg-white rounded-lg shadow p-6">
               <h2 className="text-2xl font-bold mb-4">🔗 Other Services</h2>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -305,6 +505,9 @@ const App = () => {
           </div>
         )}
       </div>
+
+      {/* AI Chatbox */}
+      <AIChatbox socket={socket} apiStatus={apiStatus} />
     </div>
   );
 };
