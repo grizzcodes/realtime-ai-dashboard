@@ -22,8 +22,8 @@ app.use(express.json());
 app.use(express.static('public'));
 
 // Import services
-const notionService = require('./src/notion-service');
-const aiProcessor = require('./src/ai-processor');
+const notionService = require('./src/services/notionService');
+const intelligentProcessor = require('./src/ai/intelligentProcessor');
 
 console.log('🚀 Starting Realtime AI Dashboard Backend...');
 console.log('📝 Notion API Key present:', !!process.env.NOTION_API_KEY);
@@ -41,7 +41,7 @@ io.on('connection', (socket) => {
   socket.on('analyzeTask', async (taskData) => {
     try {
       console.log('🧠 Analyzing task:', taskData.title);
-      const analysis = await aiProcessor.analyzeTask(taskData);
+      const analysis = await intelligentProcessor.analyzeTask(taskData);
       socket.emit('taskAnalysis', analysis);
     } catch (error) {
       console.error('❌ Task analysis failed:', error);
@@ -83,25 +83,18 @@ app.post('/api/notion/sync', async (req, res) => {
       });
     }
 
-    // Add Notion tasks to AI processor
-    let importedCount = 0;
-    for (const task of notionResult.tasks) {
-      aiProcessor.tasks.set(task.id, task);
-      importedCount++;
-    }
-
-    console.log(`📋 Imported ${importedCount} tasks from Notion`);
+    console.log(`📋 Retrieved ${notionResult.tasks.length} tasks from Notion`);
     
     // Emit to all connected clients
     io.emit('notionSync', { 
-      tasksImported: importedCount,
+      tasksImported: notionResult.tasks.length,
       tasks: notionResult.tasks 
     });
 
     res.json({
       success: true,
       message: 'Notion sync completed',
-      tasksImported: importedCount,
+      tasksImported: notionResult.tasks.length,
       tasks: notionResult.tasks
     });
   } catch (error) {
