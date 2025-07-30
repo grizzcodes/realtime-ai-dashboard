@@ -47,6 +47,9 @@ class NotionService {
         console.log('📋 Property types:');
         Object.entries(dbInfo.properties).forEach(([name, prop]) => {
           console.log(`  - ${name}: ${prop.type}`);
+          if (prop.type === 'status') {
+            console.log(`    Status options: ${prop.status?.options?.map(opt => opt.name).join(', ')}`);
+          }
         });
         
       } catch (dbError) {
@@ -89,22 +92,21 @@ class NotionService {
       const allStatuses = [...new Set(allTasks.map(t => t.rawStatus))];
       console.log('📊 All task statuses found:', allStatuses.join(', '));
       
-      // Filter for ONLY "Not Done Yet" and "In Progress" tasks
-      const activeTasks = allTasks.filter(task => {
-        const status = task.rawStatus?.toLowerCase() || '';
-        const isActive = status === 'not done yet' || status === 'in progress';
-        
-        if (!isActive) {
-          console.log(`🚫 Filtering out task "${task.title}" with status "${task.rawStatus}"`);
+      // Since ALL your tasks are "Not Done Yet", let's show them all for now
+      // But we'll organize them by priority and assignee
+      console.log(`✅ Showing all ${allTasks.length} "Not Done Yet" tasks`);
+      
+      // Sort by priority (high first) then by assignee
+      const sortedTasks = allTasks.sort((a, b) => {
+        // Sort by urgency first (higher urgency first)
+        if (a.urgency !== b.urgency) {
+          return b.urgency - a.urgency;
         }
-        
-        return isActive;
+        // Then by assignee
+        return a.assignee.localeCompare(b.assignee);
       });
       
-      console.log(`✅ ${activeTasks.length} active tasks after filtering (from ${allTasks.length} total)`);
-      console.log('✅ Active task statuses:', [...new Set(activeTasks.map(t => t.rawStatus))].join(', '));
-      
-      return { success: true, tasks: activeTasks, databaseId: this.databaseId };
+      return { success: true, tasks: sortedTasks, databaseId: this.databaseId };
     } catch (error) {
       console.error('❌ Notion API error:', error);
       return { 
@@ -147,6 +149,9 @@ class NotionService {
           return prop.formula?.string || prop.formula?.number || null;
         case 'rollup':
           return prop.rollup?.array || prop.rollup?.number || null;
+        case 'status':
+          // Handle the new status property type
+          return prop.status?.name || null;
         default:
           console.log(`⚠️ Unknown property type: ${prop.type} for property`);
           return null;
@@ -172,9 +177,6 @@ class NotionService {
     const assignedUsers = Array.isArray(assigned) ? assigned : [];
     const primaryAssignee = assignedUsers.length > 0 ? assignedUsers[0].name : 'Unassigned';
     const allAssignees = assignedUsers.map(user => user.name);
-
-    // Debug log for this specific task
-    console.log(`📋 Task: "${taskName}" | Status: "${status}" | Assigned: ${primaryAssignee}`);
 
     return {
       id: `notion-${page.id}`,
@@ -261,7 +263,7 @@ class NotionService {
         page_id: notionId,
         properties: {
           'Status': {
-            select: {
+            status: {
               name: notionStatus
             }
           }
