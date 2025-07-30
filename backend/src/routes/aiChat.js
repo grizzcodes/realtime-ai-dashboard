@@ -76,7 +76,7 @@ router.post('/ai-chat', async (req, res) => {
 
     // Choose AI model
     if (model === 'claude' && anthropic) {
-      response = await getClaude Response(message, isAdmin, conversationHistory);
+      response = await getClaudeResponse(message, isAdmin, conversationHistory);
     } else if (model === 'gpt4' && openai) {
       response = await getGPTResponse(message, isAdmin, conversationHistory);
     } else {
