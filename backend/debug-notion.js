@@ -16,7 +16,7 @@ if (!process.env.NOTION_API_KEY) {
 
 if (!process.env.NOTION_DATABASE_ID) {
   console.log('❌ NOTION_DATABASE_ID is missing from .env file');
-  console.log('Add: NOTION_DATABASE_ID=4edf1722-ef48-4cbc-988d-ed77-0d281f9b');
+  console.log('Add: NOTION_DATABASE_ID=4edf1722-ef48-4cbc-988d-ed770d281f9b');
   process.exit(1);
 }
 
@@ -76,6 +76,14 @@ async function testNotion() {
       console.log('2. Open your Notion database');
       console.log('3. Click "..." → "Add connections"');
       console.log('4. Select your integration');
+    }
+
+    if (error.code === 'validation_error') {
+      console.log('');
+      console.log('🔧 FIX: Database ID format issue');
+      console.log('Current ID:', process.env.NOTION_DATABASE_ID);
+      console.log('Expected format: 4edf1722-ef48-4cbc-988d-ed770d281f9b');
+      console.log('From URL: https://www.notion.so/dgenz/4edf1722ef484cbc988ded770d281f9b');
     }
   }
 }
