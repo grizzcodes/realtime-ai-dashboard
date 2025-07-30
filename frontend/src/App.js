@@ -11,6 +11,7 @@ const App = () => {
   const [apiStatus, setApiStatus] = useState({});
   const [currentUser, setCurrentUser] = useState('');
   const [statusOptions, setStatusOptions] = useState([]);
+  const [availableAssignees, setAvailableAssignees] = useState([]);
   
   // Task filters
   const [filters, setFilters] = useState({
@@ -38,6 +39,7 @@ const App = () => {
     socket.on('notionSync', (result) => {
       if (result.tasks) {
         setTasks(result.tasks);
+        extractAvailableAssignees(result.tasks);
       }
       if (result.statusOptions) {
         setStatusOptions(result.statusOptions);
@@ -55,12 +57,34 @@ const App = () => {
     applyFilters();
   }, [tasks, filters]);
 
+  // Extract unique assignees from tasks
+  const extractAvailableAssignees = (taskList) => {
+    const assigneeSet = new Set();
+    taskList.forEach(task => {
+      if (task.assignee && task.assignee !== 'Unassigned') {
+        assigneeSet.add(task.assignee);
+      }
+      // Also add all team members
+      if (task.keyPeople && task.keyPeople.length > 0) {
+        task.keyPeople.forEach(person => {
+          if (person && person !== 'Unknown User') {
+            assigneeSet.add(person);
+          }
+        });
+      }
+    });
+    const assignees = Array.from(assigneeSet).sort();
+    setAvailableAssignees(assignees);
+    console.log('👥 Available assignees:', assignees);
+  };
+
   const loadTasks = async () => {
     try {
       const response = await fetch('http://localhost:3001/api/tasks');
       const data = await response.json();
       setTasks(data.tasks || []);
       setStatusOptions(data.statusOptions || []);
+      extractAvailableAssignees(data.tasks || []);
     } catch (error) {
       console.error('Failed to load tasks:', error);
     }
@@ -81,10 +105,16 @@ const App = () => {
     let filtered = [...tasks];
 
     if (filters.assignee) {
-      filtered = filtered.filter(task => 
-        task.assignee?.toLowerCase().includes(filters.assignee.toLowerCase()) ||
-        task.keyPeople?.some(person => person.toLowerCase().includes(filters.assignee.toLowerCase()))
-      );
+      filtered = filtered.filter(task => {
+        const assigneeName = task.assignee?.toLowerCase() || '';
+        const keyPeople = task.keyPeople || [];
+        const teamMembers = keyPeople.map(person => person.toLowerCase());
+        
+        const searchTerm = filters.assignee.toLowerCase();
+        
+        return assigneeName.includes(searchTerm) || 
+               teamMembers.some(member => member.includes(searchTerm));
+      });
     }
 
     if (filters.project) {
@@ -135,6 +165,7 @@ const App = () => {
     setTasks([]);
     setFilteredTasks([]);
     setStatusOptions([]);
+    setAvailableAssignees([]);
     console.log('🗑️ Tasks cleared from frontend');
   };
 
@@ -190,6 +221,7 @@ const App = () => {
         alert(`✅ Notion sync complete! Found ${data.tasksImported} tasks.`);
         setTasks(data.tasks || []);
         setStatusOptions(data.statusOptions || []);
+        extractAvailableAssignees(data.tasks || []);
       } else {
         alert(`❌ Notion sync failed: ${data.error}`);
       }
@@ -390,13 +422,18 @@ const App = () => {
 
               {/* Filters */}
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-4 p-3 bg-gray-50 rounded">
-                <input
-                  type="text"
-                  placeholder="Assignee"
+                <select
                   value={filters.assignee}
                   onChange={(e) => setFilters({...filters, assignee: e.target.value})}
                   className="px-2 py-1 border rounded text-sm"
-                />
+                >
+                  <option value="">All Assignees</option>
+                  {availableAssignees.map(assignee => (
+                    <option key={assignee} value={assignee}>
+                      👤 {assignee}
+                    </option>
+                  ))}
+                </select>
                 <input
                   type="text"
                   placeholder="Project"
@@ -442,6 +479,16 @@ const App = () => {
                 />
               </div>
 
+              {/* Show current filters */}
+              {(filters.assignee || filters.project || filters.status !== 'all') && (
+                <div className="mb-4 p-2 bg-blue-50 rounded text-sm">
+                  <strong>Active Filters:</strong>
+                  {filters.assignee && <span className="ml-2 bg-blue-200 px-2 py-1 rounded">👤 {filters.assignee}</span>}
+                  {filters.project && <span className="ml-2 bg-green-200 px-2 py-1 rounded">📁 {filters.project}</span>}
+                  {filters.status !== 'all' && <span className="ml-2 bg-purple-200 px-2 py-1 rounded">📊 {filters.status}</span>}
+                </div>
+              )}
+
               {/* Tasks List */}
               {filteredTasks.length === 0 ? (
                 <div className="text-center py-8">
@@ -467,51 +514,63 @@ const App = () => {
                         <h4 className="font-medium text-lg">{task.title}</h4>
                       </div>
                       
-                      <div className="text-sm text-gray-600 space-y-1">
-                        <div className="flex gap-4">
+                      <div className="text-sm text-gray-600 space-y-2">
+                        <div className="flex gap-4 items-center">
                           <span className="font-medium">Status:</span>
                           <span className={`px-2 py-1 rounded border text-xs ${getStatusColorClass(task.statusColor)}`}>
                             {task.rawStatus}
                           </span>
                         </div>
+                        
+                        <div className="flex gap-4 items-center">
+                          <span className="font-medium">People:</span>
+                          <div className="flex gap-1 flex-wrap">
+                            {task.keyPeople && task.keyPeople.length > 0 ? (
+                              task.keyPeople.map(person => (
+                                <span key={person} className="bg-green-100 text-green-800 px-2 py-1 rounded text-xs">
+                                  👤 {person}
+                                </span>
+                              ))
+                            ) : (
+                              <span className="bg-gray-100 text-gray-600 px-2 py-1 rounded text-xs">
+                                👤 Unassigned
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
                         <div className="flex gap-4">
                           <span className="font-medium">Source:</span>
                           <span className="capitalize">{task.source}</span>
                         </div>
-                        <div className="flex gap-4">
-                          <span className="font-medium">Assigned:</span>
-                          <span>{task.assignee}</span>
-                        </div>
-                        {task.keyPeople && task.keyPeople.length > 1 && (
-                          <div className="flex gap-4">
-                            <span className="font-medium">Team:</span>
-                            <span>{task.keyPeople.join(', ')}</span>
-                          </div>
-                        )}
+                        
                         {task.deadline && (
                           <div className="flex gap-4">
                             <span className="font-medium">Deadline:</span>
                             <span>{new Date(task.deadline).toLocaleDateString()}</span>
                           </div>
                         )}
+                        
                         {task.project && task.project !== 'General' && (
                           <div className="flex gap-4">
                             <span className="font-medium">Project:</span>
                             <span>{task.project}</span>
                           </div>
                         )}
+                        
                         {task.tags && task.tags.length > 0 && (
                           <div className="flex gap-4">
                             <span className="font-medium">Tags:</span>
-                            <div className="flex gap-1">
+                            <div className="flex gap-1 flex-wrap">
                               {task.tags.map(tag => (
                                 <span key={tag} className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs">
-                                  {tag}
+                                  #{tag}
                                 </span>
                               ))}
                             </div>
                           </div>
                         )}
+                        
                         <div className="flex gap-4 text-xs text-gray-500">
                           <span>Created: {new Date(task.created).toLocaleDateString()}</span>
                           {task.confidence && (
@@ -528,7 +587,7 @@ const App = () => {
             {/* Integration Status - Takes up 1 column */}
             <div className="bg-white rounded-lg shadow p-6">
               <h2 className="text-xl font-bold mb-4">📊 Integration Status</h2>
-              <div className="space-y-3">
+              <div className="space-y-3 mb-6">
                 {sortedIntegrations.slice(0, 6).map(integration => (
                   <div key={integration.name} className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
@@ -542,6 +601,18 @@ const App = () => {
                   </div>
                 ))}
               </div>
+
+              {/* Quick Stats */}
+              {tasks.length > 0 && (
+                <div className="border-t pt-4">
+                  <h3 className="font-bold text-sm mb-2">📈 Quick Stats</h3>
+                  <div className="space-y-1 text-xs text-gray-600">
+                    <div>Total Tasks: {tasks.length}</div>
+                    <div>Filtered: {filteredTasks.length}</div>
+                    <div>Team Members: {availableAssignees.length}</div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}
