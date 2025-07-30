@@ -118,6 +118,24 @@ app.get('/api/health', async (req, res) => {
   }
 });
 
+// Get status options endpoint
+app.get('/api/notion/status-options', async (req, res) => {
+  try {
+    const statusOptions = await notionService.getStatusOptions();
+    res.json({
+      success: true,
+      statusOptions: statusOptions
+    });
+  } catch (error) {
+    console.error('❌ Failed to get status options:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      statusOptions: []
+    });
+  }
+});
+
 // Test integration endpoints
 app.get('/api/test/:integration', async (req, res) => {
   const integration = req.params.integration.toLowerCase();
@@ -162,13 +180,15 @@ app.get('/api/tasks', async (req, res) => {
       res.json({
         success: true,
         tasks: notionResult.tasks || [],
+        statusOptions: notionResult.statusOptions || [],
         source: 'notion'
       });
     } else {
       res.status(400).json({
         success: false,
         error: notionResult.error,
-        tasks: []
+        tasks: [],
+        statusOptions: []
       });
     }
   } catch (error) {
@@ -176,7 +196,8 @@ app.get('/api/tasks', async (req, res) => {
     res.status(500).json({
       success: false,
       error: error.message,
-      tasks: []
+      tasks: [],
+      statusOptions: []
     });
   }
 });
@@ -189,7 +210,7 @@ app.post('/api/notion/sync', async (req, res) => {
     console.log('🆔 Database ID:', process.env.NOTION_DATABASE_ID);
     
     const notionResult = await notionService.getTasks();
-    console.log('📋 Notion result:', notionResult);
+    console.log('📋 Notion result success:', notionResult.success);
     
     if (!notionResult.success) {
       console.error('❌ Notion sync failed:', notionResult.error);
@@ -204,18 +225,21 @@ app.post('/api/notion/sync', async (req, res) => {
     }
 
     console.log(`📋 Retrieved ${notionResult.tasks.length} tasks from Notion`);
+    console.log(`🎨 Found ${notionResult.statusOptions.length} status options`);
     
     // Emit to all connected clients
     io.emit('notionSync', { 
       tasksImported: notionResult.tasks.length,
-      tasks: notionResult.tasks 
+      tasks: notionResult.tasks,
+      statusOptions: notionResult.statusOptions
     });
 
     res.json({
       success: true,
       message: 'Notion sync completed',
       tasksImported: notionResult.tasks.length,
-      tasks: notionResult.tasks
+      tasks: notionResult.tasks,
+      statusOptions: notionResult.statusOptions
     });
   } catch (error) {
     console.error('❌ Notion sync failed:', error);
