@@ -22,7 +22,7 @@ const App = () => {
   });
 
   useEffect(() => {
-    const socket = io('http://localhost:3002');
+    const socket = io('http://localhost:3001');
     socket.on('connect', () => setIsConnected(true));
     socket.on('disconnect', () => setIsConnected(false));
     
@@ -46,7 +46,7 @@ const App = () => {
 
   const loadTasks = async () => {
     try {
-      const response = await fetch('http://localhost:3002/api/tasks');
+      const response = await fetch('http://localhost:3001/api/tasks');
       const data = await response.json();
       setTasks(data.tasks || []);
     } catch (error) {
@@ -56,7 +56,7 @@ const App = () => {
 
   const loadApiStatus = async () => {
     try {
-      const response = await fetch('http://localhost:3002/health');
+      const response = await fetch('http://localhost:3001/api/health');
       const data = await response.json();
       setApiStatus(data.apiConnections || {});
       setCurrentUser(data.user || 'unknown');
@@ -118,7 +118,7 @@ const App = () => {
 
   const testAI = async () => {
     try {
-      const response = await fetch('http://localhost:3002/api/ai-test', {
+      const response = await fetch('http://localhost:3001/api/ai-test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: 'Test message' })
@@ -139,7 +139,7 @@ const App = () => {
 
   const testIntegration = async (name) => {
     try {
-      const response = await fetch(`http://localhost:3002/api/test/${name.toLowerCase()}`);
+      const response = await fetch(`http://localhost:3001/api/test/${name.toLowerCase()}`);
       const data = await response.json();
       
       if (data.success) {
@@ -156,7 +156,7 @@ const App = () => {
 
   const syncWithNotion = async () => {
     try {
-      const response = await fetch('http://localhost:3002/api/notion/sync', {
+      const response = await fetch('http://localhost:3001/api/notion/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' }
       });
@@ -175,7 +175,7 @@ const App = () => {
 
   const markTaskComplete = async (taskId) => {
     try {
-      const response = await fetch(`http://localhost:3002/api/tasks/${taskId}/status`, {
+      const response = await fetch(`http://localhost:3001/api/tasks/${taskId}/status`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: 'completed' })
@@ -593,7 +593,7 @@ const App = () => {
                       
                       {integration.name === 'Gmail' && (
                         <a 
-                          href="http://localhost:3002/auth/google" 
+                          href="http://localhost:3001/auth/google" 
                           target="_blank" 
                           rel="noopener noreferrer"
                           className="block w-full bg-green-500 text-white py-2 px-4 rounded text-center hover:bg-green-600"
