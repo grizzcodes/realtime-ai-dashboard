@@ -1,4 +1,4 @@
-  async testCalendarConnection() {
+  async testGmailConnection() {
     try {
       if (!process.env.GOOGLE_REFRESH_TOKEN) {
         return { 
@@ -36,18 +36,18 @@
         access_token: tokens.access_token
       });
 
-      const calendar = google.calendar({ version: 'v3', auth: this.googleAuth });
-      const response = await calendar.calendarList.list();
+      const gmail = google.gmail({ version: 'v1', auth: this.googleAuth });
+      const response = await gmail.users.getProfile({ userId: 'me' });
       
       return {
         success: true,
-        message: `Connected: ${response.data.items.length} calendars`,
-        calendars: response.data.items.length
+        message: `Connected: ${response.data.emailAddress}`,
+        emailAddress: response.data.emailAddress
       };
     } catch (error) {
       return {
         success: false,
-        error: `Calendar failed: ${error.message}`,
+        error: `Gmail failed: ${error.message}`,
         needsAuth: error.code === 401 || error.message.includes('invalid_grant')
       };
     }
