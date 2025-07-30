@@ -98,10 +98,11 @@ class NotionService {
         throw dbError;
       }
       
-      // Query all tasks
-      console.log('📋 Querying all tasks...');
+      // Query with increased page size (200 max)
+      console.log('📋 Querying up to 200 tasks from Notion...');
       const response = await this.notion.databases.query({
         database_id: this.databaseId,
+        page_size: 100, // Notion's max per request
         sorts: [
           {
             property: 'Priority',
@@ -110,9 +111,36 @@ class NotionService {
         ]
       });
 
-      console.log(`📋 Found ${response.results.length} total pages in Notion`);
+      let allTasks = [...response.results];
       
-      if (response.results.length === 0) {
+      // If there are more pages, fetch them
+      let cursor = response.next_cursor;
+      let pageCount = 1;
+      
+      while (cursor && allTasks.length < 200) {
+        console.log(`📋 Fetching page ${pageCount + 1}...`);
+        const nextPage = await this.notion.databases.query({
+          database_id: this.databaseId,
+          page_size: Math.min(100, 200 - allTasks.length),
+          start_cursor: cursor,
+          sorts: [
+            {
+              property: 'Priority',
+              direction: 'ascending'
+            }
+          ]
+        });
+        
+        allTasks = [...allTasks, ...nextPage.results];
+        cursor = nextPage.next_cursor;
+        pageCount++;
+        
+        if (!cursor) break;
+      }
+
+      console.log(`📋 Found ${allTasks.length} total pages in Notion (fetched ${pageCount} pages)`);
+      
+      if (allTasks.length === 0) {
         return { 
           success: true, 
           tasks: [], 
@@ -122,23 +150,40 @@ class NotionService {
       }
 
       // Parse all tasks
-      const allTasks = response.results.map(page => this.parseNotionPage(page, dbInfo.properties));
+      const parsedTasks = allTasks.map(page => this.parseNotionPage(page, dbInfo.properties));
       
       // Log all unique statuses for debugging
-      const allStatuses = [...new Set(allTasks.map(t => t.rawStatus))];
+      const allStatuses = [...new Set(parsedTasks.map(t => t.rawStatus))];
       console.log('📊 All task statuses found:', allStatuses.join(', '));
       
-      // Sort by priority (high first) then by assignee
-      const sortedTasks = allTasks.sort((a, b) => {
-        // Sort by urgency first (higher urgency first)
+      // Sort tasks to prioritize "Not Done Yet" first, then by priority and assignee
+      const sortedTasks = parsedTasks.sort((a, b) => {
+        // First priority: "Not Done Yet" tasks come first
+        const aIsNotDone = a.rawStatus?.toLowerCase() === 'not done yet';
+        const bIsNotDone = b.rawStatus?.toLowerCase() === 'not done yet';
+        
+        if (aIsNotDone && !bIsNotDone) return -1;
+        if (!aIsNotDone && bIsNotDone) return 1;
+        
+        // Second priority: Within same status, sort by urgency (higher first)
         if (a.urgency !== b.urgency) {
           return b.urgency - a.urgency;
         }
-        // Then by assignee
+        
+        // Third priority: Then by assignee
         return a.assignee.localeCompare(b.assignee);
       });
       
+      // Count tasks by status
+      const statusCounts = {};
+      sortedTasks.forEach(task => {
+        const status = task.rawStatus || 'Unknown';
+        statusCounts[status] = (statusCounts[status] || 0) + 1;
+      });
+      
+      console.log('📊 Task counts by status:', Object.entries(statusCounts).map(([status, count]) => `${status}: ${count}`).join(', '));
       console.log(`✅ Returning ${sortedTasks.length} tasks with ${this.statusOptions.length} status options`);
+      console.log(`🔥 "Not Done Yet" tasks will appear first in the list`);
       
       return { 
         success: true, 
