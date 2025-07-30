@@ -87,7 +87,24 @@ const App = () => {
     }
 
     if (filters.status !== 'all') {
-      filtered = filtered.filter(task => task.status === filters.status);
+      // Handle both internal status values and raw Notion status values
+      filtered = filtered.filter(task => {
+        const taskStatus = task.status;
+        const rawStatus = task.rawStatus?.toLowerCase() || '';
+        
+        switch (filters.status) {
+          case 'not_done_yet':
+            return rawStatus === 'not done yet' || taskStatus === 'pending';
+          case 'pending':
+            return taskStatus === 'pending';
+          case 'completed':
+            return taskStatus === 'completed';
+          case 'in_progress':
+            return taskStatus === 'in_progress';
+          default:
+            return taskStatus === filters.status;
+        }
+      });
     }
 
     if (filters.dateFrom) {
@@ -206,6 +223,20 @@ const App = () => {
       case 3: return 'Medium';
       case 2: return 'Low';
       default: return 'Normal';
+    }
+  };
+
+  const getStatusDisplay = (task) => {
+    // Show the raw Notion status if available, otherwise show mapped status
+    if (task.rawStatus) {
+      return task.rawStatus;
+    }
+    
+    switch (task.status) {
+      case 'pending': return 'Not Done Yet';
+      case 'in_progress': return 'In Progress';
+      case 'completed': return 'Done';
+      default: return task.status;
     }
   };
 
@@ -395,9 +426,10 @@ const App = () => {
                   className="px-2 py-1 border rounded text-sm"
                 >
                   <option value="all">All Status</option>
-                  <option value="pending">Pending</option>
-                  <option value="completed">Completed</option>
+                  <option value="not_done_yet">Not Done Yet</option>
                   <option value="in_progress">In Progress</option>
+                  <option value="completed">Done</option>
+                  <option value="pending">Pending</option>
                 </select>
                 <input
                   type="date"
@@ -415,7 +447,7 @@ const App = () => {
 
               {/* Tasks List */}
               {filteredTasks.length === 0 ? (
-                <p className="text-gray-500">No tasks match your filters. Click Test AI to generate some!</p>
+                <p className="text-gray-500">No tasks match your filters. Click Sync Notion to load your tasks!</p>
               ) : (
                 <div className="space-y-3 max-h-96 overflow-y-auto">
                   {filteredTasks.map(task => (
@@ -440,12 +472,20 @@ const App = () => {
                       
                       <div className="text-sm text-gray-600 space-y-1">
                         <div className="flex gap-4">
+                          <span className="font-medium">Status:</span>
+                          <span className="capitalize">{getStatusDisplay(task)}</span>
+                        </div>
+                        <div className="flex gap-4">
                           <span className="font-medium">Source:</span>
                           <span className="capitalize">{task.source}</span>
                         </div>
-                        {task.keyPeople && task.keyPeople.length > 0 && (
+                        <div className="flex gap-4">
+                          <span className="font-medium">Assigned:</span>
+                          <span>{task.assignee}</span>
+                        </div>
+                        {task.keyPeople && task.keyPeople.length > 1 && (
                           <div className="flex gap-4">
-                            <span className="font-medium">People:</span>
+                            <span className="font-medium">Team:</span>
                             <span>{task.keyPeople.join(', ')}</span>
                           </div>
                         )}
@@ -453,6 +493,12 @@ const App = () => {
                           <div className="flex gap-4">
                             <span className="font-medium">Deadline:</span>
                             <span>{new Date(task.deadline).toLocaleDateString()}</span>
+                          </div>
+                        )}
+                        {task.project && task.project !== 'General' && (
+                          <div className="flex gap-4">
+                            <span className="font-medium">Project:</span>
+                            <span>{task.project}</span>
                           </div>
                         )}
                         {task.tags && task.tags.length > 0 && (
