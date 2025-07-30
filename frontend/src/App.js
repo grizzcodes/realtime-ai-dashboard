@@ -1,82 +1,230 @@
-                  </h3>
-                  <div className={`mb-2 ${apiStatus.gmail?.success ? 'text-green-600' : 'text-red-600'}`}>
-                    Gmail Status: {apiStatus.gmail?.success ? '✅ Connected' : '❌ Not Connected'}
-                  </div>
-                  <div className={`mb-2 ${apiStatus.calendar?.success ? 'text-green-600' : 'text-red-600'}`}>
-                    Calendar Status: {apiStatus.calendar?.success ? '✅ Connected' : '❌ Not Connected'}
-                  </div>
-                  <div className="bg-gray-50 p-3 rounded text-sm">
-                    <p><strong>Setup Steps:</strong></p>
-                    <ol className="list-decimal list-inside space-y-1 mt-2">
-                      <li>Click "Setup OAuth" button below</li>
-                      <li>Authorize Gmail and Calendar access</li>
-                      <li>Copy the refresh token to your .env file as GOOGLE_REFRESH_TOKEN</li>
-                      <li>Restart your backend server</li>
-                      <li>Test connections in the Integrations tab</li>
-                    </ol>
-                    <button 
-                      onClick={() => window.open('http://localhost:3002/auth/google', '_blank')}
-                      className="mt-3 bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600"
-                    >
-                      🔐 Setup Google OAuth
-                    </button>
-                  </div>
-                </div>
+import React, { useState, useEffect } from 'react';
+import io from 'socket.io-client';
+import './App.css';
 
-                {/* Slack Setup */}
-                <div className="border-l-4 border-purple-500 pl-4">
-                  <h3 className="font-semibold text-lg mb-2">💬 Slack Integration</h3>
-                  <div className={`mb-2 ${apiStatus.slack?.success ? 'text-green-600' : 'text-red-600'}`}>
-                    Status: {apiStatus.slack?.success ? '✅ Connected' : '❌ Not Connected'}
-                  </div>
-                  <div className="bg-gray-50 p-3 rounded text-sm">
-                    <p><strong>Setup Steps:</strong></p>
-                    <ol className="list-decimal list-inside space-y-1 mt-2">
-                      <li>Go to <a href="https://api.slack.com/apps" className="text-blue-500 underline" target="_blank" rel="noopener noreferrer">api.slack.com/apps</a></li>
-                      <li>Create a new Slack app for your workspace</li>
-                      <li>Go to "OAuth & Permissions" and get the Bot User OAuth Token</li>
-                      <li>Add <code>SLACK_BOT_TOKEN=xoxb-your_token</code> to your .env file</li>
-                      <li>Restart backend and test connection</li>
-                    </ol>
-                  </div>
-                </div>
+const App = () => {
+  const [tasks, setTasks] = useState([]);
+  const [isConnected, setIsConnected] = useState(false);
+  const [activeTab, setActiveTab] = useState('dashboard');
+  const [apiStatus, setApiStatus] = useState({});
 
-                {/* Fireflies Setup */}
-                <div className="border-l-4 border-orange-500 pl-4">
-                  <h3 className="font-semibold text-lg mb-2">🎙️ Fireflies Integration</h3>
-                  <div className={`mb-2 ${apiStatus.fireflies?.success ? 'text-green-600' : 'text-red-600'}`}>
-                    Status: {apiStatus.fireflies?.success ? '✅ Connected' : '❌ Not Connected'}
-                  </div>
-                  <div className="bg-gray-50 p-3 rounded text-sm">
-                    <p><strong>Setup Steps:</strong></p>
-                    <ol className="list-decimal list-inside space-y-1 mt-2">
-                      <li>Log into your Fireflies.ai account</li>
-                      <li>Go to Settings → API</li>
-                      <li>Generate an API key</li>
-                      <li>Add <code>FIREFLIES_API_KEY=your_api_key</code> to your .env file</li>
-                      <li>Restart backend and test connection</li>
-                    </ol>
-                  </div>
-                </div>
+  useEffect(() => {
+    const socket = io('http://localhost:3002');
+    socket.on('connect', () => setIsConnected(true));
+    socket.on('disconnect', () => setIsConnected(false));
+    
+    loadTasks();
+    loadApiStatus();
+      
+    return () => socket.close();
+  }, []);
 
-                {/* Environment Variables */}
-                <div className="border-l-4 border-gray-500 pl-4">
-                  <h3 className="font-semibold text-lg mb-2">⚙️ Environment Variables</h3>
-                  <div className="bg-gray-900 text-green-400 p-4 rounded text-sm font-mono">
-                    <div># Required for Google services</div>
-                    <div>GOOGLE_CLIENT_ID=your_google_client_id</div>
-                    <div>GOOGLE_CLIENT_SECRET=your_google_client_secret</div>
-                    <div>GOOGLE_REFRESH_TOKEN=your_refresh_token</div>
-                    <div className="mt-2"># Communication platforms</div>
-                    <div>SLACK_BOT_TOKEN=xoxb-your_slack_token</div>
-                    <div>FIREFLIES_API_KEY=your_fireflies_api_key</div>
-                    <div className="mt-2"># AI Services</div>
-                    <div>OPENAI_API_KEY=sk-your_openai_key</div>
-                    <div>ANTHROPIC_API_KEY=sk-ant-your_claude_key</div>
-                    <div className="mt-2"># Task Management</div>
-                    <div>NOTION_API_KEY=secret_your_notion_token</div>
-                  </div>
+  const loadTasks = async () => {
+    try {
+      const response = await fetch('http://localhost:3002/api/tasks');
+      const data = await response.json();
+      setTasks(data.tasks || []);
+    } catch (error) {
+      console.error('Failed to load tasks:', error);
+    }
+  };
+
+  const loadApiStatus = async () => {
+    try {
+      const response = await fetch('http://localhost:3002/api/health');
+      const data = await response.json();
+      setApiStatus(data.apiConnections || {});
+    } catch (error) {
+      console.error('Failed to load API status:', error);
+    }
+  };
+
+  const testAI = async () => {
+    try {
+      const response = await fetch('http://localhost:3002/api/ai-test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: 'Test message' })
+      });
+      const result = await response.json();
+      console.log('AI Test Result:', result);
+      alert(`✅ AI test: ${result.message}`);
+      loadTasks();
+    } catch (error) {
+      console.error('AI test failed:', error);
+      alert(`❌ AI test failed: ${error.message}`);
+    }
+  };
+
+  const testIntegration = async (name) => {
+    try {
+      const response = await fetch(`http://localhost:3002/api/test/${name.toLowerCase()}`);
+      const data = await response.json();
+      
+      if (data.success) {
+        alert(`✅ ${name}: ${data.message || 'Connection successful!'}`);
+      } else {
+        if (data.needsAuth && (name === 'Gmail' || name === 'Calendar')) {
+          if (confirm(`${name} requires OAuth setup. Click OK to authenticate now.`)) {
+            window.open('http://localhost:3002/auth/google', '_blank');
+          }
+        } else {
+          alert(`❌ ${name} failed: ${data.error}`);
+        }
+      }
+      
+      setTimeout(loadApiStatus, 2000);
+    } catch (error) {
+      alert(`❌ ${name} connection failed: ${error.message}`);
+    }
+  };
+
+  const integrations = [
+    { 
+      name: 'Gmail', 
+      icon: '📧', 
+      description: 'Email monitoring', 
+      status: apiStatus.gmail?.success ? 'connected' : 'error'
+    },
+    { 
+      name: 'Slack', 
+      icon: '💬', 
+      description: 'Team communication', 
+      status: apiStatus.slack?.success ? 'connected' : 'error'
+    },
+    { 
+      name: 'Calendar', 
+      icon: '📅', 
+      description: 'Schedule management', 
+      status: apiStatus.calendar?.success ? 'connected' : 'error'
+    },
+    { 
+      name: 'Notion', 
+      icon: '📝', 
+      description: 'Task management', 
+      status: apiStatus.notion?.success ? 'connected' : 'error'
+    }
+  ];
+
+  const getStatusColor = (status) => {
+    return status === 'connected' ? 'bg-green-500' : 'bg-red-500';
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-100">
+      <div className="bg-white shadow p-4">
+        <div className="flex justify-between items-center">
+          <h1 className="text-3xl font-bold">🤖 AI Dashboard</h1>
+          <div className="flex gap-4 items-center">
+            <span className={isConnected ? 'text-green-600' : 'text-red-600'}>
+              {isConnected ? '🔗 Connected' : '❌ Disconnected'}
+            </span>
+            <button onClick={testAI} className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">
+              🧪 Test AI
+            </button>
+          </div>
+        </div>
+        
+        <div className="flex gap-2 mt-4">
+          {['dashboard', 'integrations'].map(tab => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={`px-4 py-2 rounded ${activeTab === tab ? 'bg-blue-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
+            >
+              {tab.charAt(0).toUpperCase() + tab.slice(1)}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="p-6">
+        {activeTab === 'dashboard' && (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="lg:col-span-2 bg-white rounded-lg shadow p-6">
+              <h2 className="text-xl font-bold mb-4">📋 Tasks ({tasks.length})</h2>
+              {tasks.length === 0 ? (
+                <div className="text-center py-8">
+                  <p className="text-gray-500 mb-4">No tasks loaded.</p>
                 </div>
+              ) : (
+                <div className="space-y-3">
+                  {tasks.slice(0, 5).map(task => (
+                    <div key={task.id} className="border rounded-lg p-4">
+                      <h4 className="font-medium">{task.title}</h4>
+                      <p className="text-sm text-gray-600">Status: {task.status || 'Unknown'}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="bg-white rounded-lg shadow p-6">
+              <h2 className="text-xl font-bold mb-4">📊 Integration Status</h2>
+              <div className="space-y-3">
+                {integrations.map(integration => (
+                  <div key={integration.name} className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span>{integration.icon}</span>
+                      <span className="font-medium">{integration.name}</span>
+                    </div>
+                    <div className={`w-3 h-3 rounded-full ${getStatusColor(integration.status)}`}></div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+        
+        {activeTab === 'integrations' && (
+          <div className="space-y-6">
+            <div className="bg-white rounded-lg shadow p-6">
+              <h2 className="text-2xl font-bold mb-4">🔗 Service Integrations</h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {integrations.map(integration => (
+                  <div key={integration.name} className="bg-white border rounded-lg p-6">
+                    <div className="flex items-center gap-3 mb-4">
+                      <span className="text-2xl">{integration.icon}</span>
+                      <div className="flex-1">
+                        <h3 className="font-bold">{integration.name}</h3>
+                        <p className="text-sm text-gray-600">{integration.description}</p>
+                      </div>
+                      <div className={`w-3 h-3 rounded-full ${getStatusColor(integration.status)}`}></div>
+                    </div>
+                    
+                    <div className="space-y-2">
+                      <button 
+                        onClick={() => testIntegration(integration.name)}
+                        className="w-full bg-blue-500 text-white py-2 px-4 rounded hover:bg-blue-600"
+                      >
+                        Test Connection
+                      </button>
+                      
+                      {(integration.name === 'Gmail' || integration.name === 'Calendar') && (
+                        <button 
+                          onClick={() => window.open('http://localhost:3002/auth/google', '_blank')}
+                          className="w-full bg-green-500 text-white py-2 px-4 rounded hover:bg-green-600"
+                        >
+                          Setup OAuth
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="bg-white rounded-lg shadow p-6">
+              <h3 className="text-lg font-bold mb-3">📧 Gmail & 📅 Calendar Setup</h3>
+              <div className="bg-gray-50 p-3 rounded text-sm">
+                <p><strong>Steps:</strong></p>
+                <ol className="list-decimal list-inside space-y-1 mt-2">
+                  <li>Click "Setup OAuth" button above</li>
+                  <li>Authorize Gmail and Calendar access</li>
+                  <li>Copy the refresh token to your .env file as GOOGLE_REFRESH_TOKEN</li>
+                  <li>Restart your backend server</li>
+                  <li>Test connections</li>
+                </ol>
               </div>
             </div>
           </div>
