@@ -23,10 +23,12 @@ app.use(express.static('public'));
 
 // Import services
 const NotionService = require('./src/services/notionService');
+const IntegrationService = require('./src/services/integrationService');
 const intelligentProcessor = require('./src/ai/intelligentProcessor');
 
 // Initialize services
 const notionService = new NotionService();
+const integrationService = new IntegrationService();
 
 console.log('🚀 Starting Realtime AI Dashboard Backend...');
 console.log('📝 Notion API Key present:', !!process.env.NOTION_API_KEY);
@@ -55,13 +57,13 @@ io.on('connection', (socket) => {
 
 // Function to check integration statuses
 async function checkIntegrationStatus() {
+  const integrationsStatus = await integrationService.getAllIntegrationsStatus();
+  
   const status = {
     notion: { success: false, error: null },
     openai: { success: false, error: null },
     claude: { success: false, error: null },
-    gmail: { success: false, error: null },
-    slack: { success: false, error: null },
-    calendar: { success: false, error: null }
+    ...integrationsStatus
   };
 
   // Test Notion
@@ -86,13 +88,77 @@ async function checkIntegrationStatus() {
     status.claude = { success: false, error: 'API key not configured' };
   }
 
-  // Gmail, Slack, Calendar (placeholder - need OAuth setup)
-  status.gmail = { success: false, error: 'OAuth not configured' };
-  status.slack = { success: false, error: 'OAuth not configured' };
-  status.calendar = { success: false, error: 'OAuth not configured' };
-
   return status;
 }
+
+// OAuth Routes for Google (Gmail & Calendar)
+app.get('/auth/google', (req, res) => {
+  const scopes = [
+    'https://www.googleapis.com/auth/gmail.readonly',
+    'https://www.googleapis.com/auth/calendar',
+    'https://www.googleapis.com/auth/userinfo.email'
+  ];
+
+  const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
+    `client_id=${process.env.GOOGLE_CLIENT_ID}&` +
+    `redirect_uri=${encodeURIComponent('http://localhost:3002/auth/google/callback')}&` +
+    `response_type=code&` +
+    `scope=${encodeURIComponent(scopes.join(' '))}&` +
+    `access_type=offline&` +
+    `prompt=consent`;
+
+  res.redirect(authUrl);
+});
+
+app.get('/auth/google/callback', async (req, res) => {
+  const { code } = req.query;
+  
+  if (!code) {
+    return res.send('❌ Authorization failed - no code received');
+  }
+
+  try {
+    const response = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: process.env.GOOGLE_CLIENT_ID,
+        client_secret: process.env.GOOGLE_CLIENT_SECRET,
+        code,
+        grant_type: 'authorization_code',
+        redirect_uri: 'http://localhost:3002/auth/google/callback'
+      })
+    });
+
+    const tokens = await response.json();
+    
+    if (tokens.error) {
+      return res.send(`❌ Token exchange failed: ${tokens.error_description}`);
+    }
+
+    res.send(`
+      <h2>✅ Google OAuth Success!</h2>
+      <p><strong>Refresh Token:</strong></p>
+      <textarea style="width:100%;height:60px;">${tokens.refresh_token}</textarea>
+      
+      <h3>Next Steps:</h3>
+      <ol>
+        <li>Copy the refresh token above</li>
+        <li>Add it to your <code>backend/.env</code> file:
+          <pre>GOOGLE_REFRESH_TOKEN=${tokens.refresh_token}</pre>
+        </li>
+        <li>Restart your backend server</li>
+        <li>Test Gmail/Calendar connection in the dashboard</li>
+      </ol>
+      
+      <a href="http://localhost:3000">← Back to Dashboard</a>
+    `);
+
+  } catch (error) {
+    console.error('OAuth error:', error);
+    res.send(`❌ OAuth failed: ${error.message}`);
+  }
+});
 
 // Health check endpoint with integration status
 app.get('/api/health', async (req, res) => {
@@ -118,24 +184,6 @@ app.get('/api/health', async (req, res) => {
   }
 });
 
-// Get status options endpoint
-app.get('/api/notion/status-options', async (req, res) => {
-  try {
-    const statusOptions = await notionService.getStatusOptions();
-    res.json({
-      success: true,
-      statusOptions: statusOptions
-    });
-  } catch (error) {
-    console.error('❌ Failed to get status options:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message,
-      statusOptions: []
-    });
-  }
-});
-
 // Test integration endpoints
 app.get('/api/test/:integration', async (req, res) => {
   const integration = req.params.integration.toLowerCase();
@@ -145,6 +193,26 @@ app.get('/api/test/:integration', async (req, res) => {
       case 'notion':
         const notionResult = await notionService.testConnection();
         res.json(notionResult);
+        break;
+      
+      case 'gmail':
+        const gmailResult = await integrationService.testGmailConnection();
+        res.json(gmailResult);
+        break;
+        
+      case 'calendar':
+        const calendarResult = await integrationService.testCalendarConnection();
+        res.json(calendarResult);
+        break;
+        
+      case 'slack':
+        const slackResult = await integrationService.testSlackConnection();
+        res.json(slackResult);
+        break;
+        
+      case 'fireflies':
+        const firefliesResult = await integrationService.testFirefliesConnection();
+        res.json(firefliesResult);
         break;
       
       case 'openai':
@@ -168,6 +236,52 @@ app.get('/api/test/:integration', async (req, res) => {
     }
   } catch (error) {
     res.json({ success: false, error: error.message });
+  }
+});
+
+// Integration data endpoints
+app.get('/api/gmail/messages', async (req, res) => {
+  try {
+    const result = await integrationService.getRecentEmails(10);
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.get('/api/calendar/events', async (req, res) => {
+  try {
+    const result = await integrationService.getUpcomingEvents(10);
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.get('/api/slack/messages', async (req, res) => {
+  try {
+    const result = await integrationService.getRecentSlackMessages(10);
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Get status options endpoint
+app.get('/api/notion/status-options', async (req, res) => {
+  try {
+    const statusOptions = await notionService.getStatusOptions();
+    res.json({
+      success: true,
+      statusOptions: statusOptions
+    });
+  } catch (error) {
+    console.error('❌ Failed to get status options:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      statusOptions: []
+    });
   }
 });
 
@@ -269,11 +383,12 @@ app.post('/api/ai-test', async (req, res) => {
 });
 
 // Start server
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 3002;
 server.listen(PORT, () => {
   console.log(`🌐 Server running on port ${PORT}`);
   console.log(`📊 Dashboard available at http://localhost:${PORT}`);
   console.log(`🔗 Health check: http://localhost:${PORT}/api/health`);
+  console.log(`🔐 Google OAuth: http://localhost:${PORT}/auth/google`);
 });
 
 // Export for testing
