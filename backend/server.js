@@ -55,10 +55,15 @@ io.on('connection', (socket) => {
 });
 
 // Enhanced AI Response Handler with Supabase context
-async function getAIResponse(message, provider) {
+async function getAIResponse(message, provider = 'openai') {
   // Get AI context from Supabase
-  const contextResult = await supabaseService.getAIContext();
-  const context = contextResult.success ? contextResult.context : {};
+  let context = {};
+  try {
+    const contextResult = await supabaseService.getAIContext();
+    context = contextResult.success ? contextResult.context : {};
+  } catch (error) {
+    console.log('Note: Could not load AI context from Supabase');
+  }
   
   const systemPrompt = `You are an AI assistant for the Realtime AI Dashboard. You help manage integrations, analyze tasks, and provide insights.
 
@@ -128,8 +133,12 @@ Be concise and reference this context when relevant.`;
     aiResponse = "AI service not configured. Add API keys to use the chatbot.";
   }
   
-  // Save chat history to Supabase
-  await supabaseService.saveChatHistory(message, aiResponse, provider, context);
+  // Save chat history to Supabase (optional)
+  try {
+    await supabaseService.saveChatHistory(message, aiResponse, provider, context);
+  } catch (error) {
+    console.log('Note: Could not save chat history to Supabase');
+  }
   
   return aiResponse;
 }
@@ -220,7 +229,13 @@ app.get('/auth/google/callback', async (req, res) => {
 
 // Integration status check
 async function checkIntegrationStatus() {
-  const integrationsStatus = await integrationService.getAllIntegrationsStatus();
+  let integrationsStatus = {};
+  
+  try {
+    integrationsStatus = await integrationService.getAllIntegrationsStatus();
+  } catch (error) {
+    console.log('Note: Integration service not fully available');
+  }
   
   const status = {
     notion: { success: false, error: null },
@@ -276,6 +291,37 @@ app.get('/api/health', async (req, res) => {
   }
 });
 
+// NEW: AI Chat endpoint for the AIChatbox component
+app.post('/api/ai-chat', async (req, res) => {
+  try {
+    const { message, conversationHistory, provider } = req.body;
+    
+    if (!message || !message.trim()) {
+      return res.status(400).json({
+        success: false,
+        error: 'Message is required'
+      });
+    }
+
+    const aiProvider = provider || 'openai';
+    const response = await getAIResponse(message, aiProvider);
+    
+    res.json({
+      success: true,
+      response: response,
+      provider: aiProvider,
+      timestamp: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error('❌ AI chat error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 app.get('/api/test/:integration', async (req, res) => {
   const integration = req.params.integration.toLowerCase();
   
@@ -284,16 +330,32 @@ app.get('/api/test/:integration', async (req, res) => {
     
     switch (integration) {
       case 'gmail':
-        result = await integrationService.testGmailConnection();
+        try {
+          result = await integrationService.testGmailConnection();
+        } catch (error) {
+          result = { success: false, error: error.message };
+        }
         break;
       case 'calendar':
-        result = await integrationService.testCalendarConnection();
+        try {
+          result = await integrationService.testCalendarConnection();
+        } catch (error) {
+          result = { success: false, error: error.message };
+        }
         break;
       case 'slack':
-        result = await integrationService.testSlackConnection();
+        try {
+          result = await integrationService.testSlackConnection();
+        } catch (error) {
+          result = { success: false, error: error.message };
+        }
         break;
       case 'fireflies':
-        result = await integrationService.testFirefliesConnection();
+        try {
+          result = await integrationService.testFirefliesConnection();
+        } catch (error) {
+          result = { success: false, error: error.message };
+        }
         break;
       case 'notion':
         result = await notionService.testConnection();
@@ -357,7 +419,11 @@ app.get('/api/tasks', async (req, res) => {
     if (notionResult.success) {
       // Sync tasks to Supabase for AI context
       const tasks = notionResult.tasks || [];
-      await Promise.all(tasks.map(task => supabaseService.syncTask(task)));
+      try {
+        await Promise.all(tasks.map(task => supabaseService.syncTask(task)));
+      } catch (error) {
+        console.log('Note: Could not sync tasks to Supabase');
+      }
       
       res.json({
         success: true,
@@ -435,6 +501,7 @@ server.listen(PORT, () => {
   console.log(`🔐 Google OAuth: http://localhost:${PORT}/auth/google`);
   console.log(`🔗 Health check: http://localhost:${PORT}/api/health`);
   console.log(`📅 Calendar API: http://localhost:${PORT}/api/calendar/events`);
+  console.log(`🤖 AI Chat: http://localhost:${PORT}/api/ai-chat`);
 });
 
 module.exports = { app, server, io };
