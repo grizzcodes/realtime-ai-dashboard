@@ -23,9 +23,11 @@ app.use(express.json());
 // Import services
 const NotionService = require('./src/services/notionService');
 const IntegrationService = require('./src/services/integrationService');
+const SupabaseService = require('./src/services/supabaseService');
 
 const notionService = new NotionService();
 const integrationService = new IntegrationService();
+const supabaseService = new SupabaseService();
 
 console.log('🚀 Starting Realtime AI Dashboard Backend...');
 
@@ -33,17 +35,14 @@ console.log('🚀 Starting Realtime AI Dashboard Backend...');
 io.on('connection', (socket) => {
   console.log('👤 User connected:', socket.id);
   
-  // Handle AI chat messages
   socket.on('aiChat', async (data) => {
     try {
       const { message, provider, action } = data;
       
       if (action === 'modify_platform') {
-        // Handle platform modifications
         const response = await handlePlatformModification(message, provider);
         socket.emit('aiResponse', { response, type: 'modification' });
       } else {
-        // Regular chat
         const response = await getAIResponse(message, provider);
         socket.emit('aiResponse', { response, type: 'chat' });
       }
@@ -57,9 +56,22 @@ io.on('connection', (socket) => {
   });
 });
 
-// AI Response Handler - FIXED VERSION
+// Enhanced AI Response Handler with Supabase context
 async function getAIResponse(message, provider) {
-  const systemPrompt = `You are an AI assistant for the Realtime AI Dashboard. You can help users manage integrations, understand platform features, and provide real-time assistance. Be concise and helpful.`;
+  // Get AI context from Supabase
+  const contextResult = await supabaseService.getAIContext();
+  const context = contextResult.success ? contextResult.context : {};
+  
+  const systemPrompt = `You are an AI assistant for the Realtime AI Dashboard. You help manage integrations, analyze tasks, and provide insights.
+
+CURRENT CONTEXT:
+- Recent Tasks: ${JSON.stringify(context.recentTasks?.slice(0, 5) || [])}
+- Recent Events: ${JSON.stringify(context.recentEvents?.slice(0, 3) || [])}
+- Chat History: ${context.chatHistory?.map(c => `User: ${c.message} | AI: ${c.response}`).join(' | ') || 'None'}
+
+Be concise and reference this context when relevant.`;
+  
+  let aiResponse = '';
   
   if (provider === 'openai' && process.env.OPENAI_API_KEY) {
     try {
@@ -81,17 +93,14 @@ async function getAIResponse(message, provider) {
       const data = await response.json();
       
       if (data.error) {
-        return `OpenAI error: ${data.error.message}`;
+        aiResponse = `OpenAI error: ${data.error.message}`;
+      } else {
+        aiResponse = data.choices?.[0]?.message?.content || 'OpenAI response error';
       }
-      
-      return data.choices?.[0]?.message?.content || 'OpenAI response error';
     } catch (error) {
-      console.error('OpenAI error:', error);
-      return `OpenAI error: ${error.message}`;
+      aiResponse = `OpenAI error: ${error.message}`;
     }
-  }
-  
-  if (provider === 'claude' && process.env.ANTHROPIC_API_KEY) {
+  } else if (provider === 'claude' && process.env.ANTHROPIC_API_KEY) {
     try {
       const response = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
@@ -108,30 +117,31 @@ async function getAIResponse(message, provider) {
       });
       
       const data = await response.json();
-      console.log('Claude API response:', data); // Debug log
       
       if (data.error) {
-        return `Claude error: ${data.error.message}`;
+        aiResponse = `Claude error: ${data.error.message}`;
+      } else {
+        aiResponse = data.content?.[0]?.text || `Claude response error: ${JSON.stringify(data)}`;
       }
-      
-      return data.content?.[0]?.text || `Claude response error: ${JSON.stringify(data)}`;
     } catch (error) {
-      console.error('Claude error:', error);
-      return `Claude error: ${error.message}`;
+      aiResponse = `Claude error: ${error.message}`;
     }
+  } else {
+    aiResponse = "AI service not configured. Add API keys to use the chatbot.";
   }
   
-  return "AI service not configured. Please add API keys to use the chatbot.";
+  // Save chat history to Supabase
+  await supabaseService.saveChatHistory(message, aiResponse, provider, context);
+  
+  return aiResponse;
 }
 
 // Platform Modification Handler
 async function handlePlatformModification(message, provider) {
   const modificationPrompt = `You are an admin AI that can suggest platform modifications. Analyze this request and provide specific suggestions: "${message}"`;
   
-  // Get AI suggestion
   const suggestion = await getAIResponse(modificationPrompt, provider);
   
-  // Return structured response
   return {
     suggestion,
     actions: [
@@ -142,7 +152,7 @@ async function handlePlatformModification(message, provider) {
   };
 }
 
-// OAuth Routes (fixed for calendar)
+// OAuth Routes
 app.get('/auth/google', (req, res) => {
   const scopes = [
     'https://www.googleapis.com/auth/gmail.readonly',
@@ -218,10 +228,11 @@ async function checkIntegrationStatus() {
     notion: { success: false, error: null },
     openai: { success: false, error: null },
     claude: { success: false, error: null },
+    supabase: { success: false, error: null },
     ...integrationsStatus
   };
 
-  // Test Notion
+  // Test services
   try {
     const notionTest = await notionService.testConnection();
     status.notion = notionTest;
@@ -229,7 +240,13 @@ async function checkIntegrationStatus() {
     status.notion = { success: false, error: error.message };
   }
 
-  // Test AI services
+  try {
+    const supabaseTest = await supabaseService.testConnection();
+    status.supabase = supabaseTest;
+  } catch (error) {
+    status.supabase = { success: false, error: error.message };
+  }
+
   status.openai = process.env.OPENAI_API_KEY 
     ? { success: true, message: 'API key configured' }
     : { success: false, error: 'API key missing' };
@@ -282,6 +299,9 @@ app.get('/api/test/:integration', async (req, res) => {
         break;
       case 'notion':
         result = await notionService.testConnection();
+        break;
+      case 'supabase':
+        result = await supabaseService.testConnection();
         break;
       case 'openai':
         result = process.env.OPENAI_API_KEY 
@@ -337,9 +357,13 @@ app.get('/api/tasks', async (req, res) => {
     const notionResult = await notionService.getTasks();
     
     if (notionResult.success) {
+      // Sync tasks to Supabase for AI context
+      const tasks = notionResult.tasks || [];
+      await Promise.all(tasks.map(task => supabaseService.syncTask(task)));
+      
       res.json({
         success: true,
-        tasks: notionResult.tasks || [],
+        tasks: tasks,
         statusOptions: notionResult.statusOptions || [],
         source: 'notion'
       });
