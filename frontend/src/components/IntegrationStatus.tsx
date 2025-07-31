@@ -13,7 +13,8 @@ const integrations = [
 ];
 
 export default function IntegrationStatus() {
-  const [statuses, setStatuses] = useState<Record<string, boolean>>({});
+  const [statuses, setStatuses] = useState<Record <string, boolean>>({});
+  const [isMinimized, setIsMinimized] = useState(false);
 
   useEffect(() => {
     integrations.forEach(async (integration) => {
@@ -28,16 +29,31 @@ export default function IntegrationStatus() {
   }, []);
 
   return (
-    <div className="bg-white p-4 rounded shadow">
-      <h2 className="text-lg font-semibold mb-4">Integration Status</h2>
-      <ul>
-        {integrations.map(({ name }) => (
-          <li key={name} className="flex items-center justify-between mb-2">
-            <span>{name}</span>
-            <span className={`w-3 h-3 rounded-full ${statuses[name] ? 'bg-green-500' : 'bg-red-500'}`}></span>
-          </li>
-        ))}
-      </ul>
+    <div className="bg-white p-4 rounded shadow transition-all duration-300">
+      <div className="flex justify-between items-center mb-2">
+        <h2 className="text-lg font-semibold">🔌 Integration Status</h2>
+        <button
+          onClick={() => setIsMinimized(!isMinimized)}
+          className="text-sm text-blue-600 hover:underline"
+        >
+          {isMinimized ? 'Show' : 'Hide'}
+        </button>
+      </div>
+
+      {!isMinimized && (
+        <ul className="space-y-2 mt-2">
+          {integrations.map(({ name }) => (
+            <li key={name} className="flex items-center justify-between">
+              <span>{name}</span>
+              <span
+                className={`w-3 h-3 rounded-full ${
+                  statuses[name] ? 'bg-green-500' : 'bg-red-500'
+                }`}
+              ></span>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

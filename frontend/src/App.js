@@ -302,7 +302,7 @@ const App = () => {
               {/* Calendar Events */}
               <div className="backdrop-blur-xl bg-white/10 border border-white/20 rounded-2xl shadow-2xl p-6">
                 <div className="flex items-center justify-between mb-6">
-                  <h2 className="text-xl font-bold text-gray-900">📅 Next 5 Events</h2>
+                  <h2 className="text-xl font-bold text-gray-900">📅 Coming Next</h2>
                   <span className="text-xs text-gray-500">{userTimezone}</span>
                 </div>
                 
