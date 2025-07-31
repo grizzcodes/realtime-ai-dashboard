@@ -15,6 +15,7 @@ const App = () => {
   const [userTimezone] = useState(Intl.DateTimeFormat().resolvedOptions().timeZone);
   const [selectedMeeting, setSelectedMeeting] = useState(null);
   const [showDashboard, setShowDashboard] = useState(false);
+  const [meetingsLoading, setMeetingsLoading] = useState(false);
 
   useEffect(() => {
     const newSocket = io('http://localhost:3002');
@@ -48,32 +49,28 @@ const App = () => {
   };
 
   const loadMeetings = async () => {
+    console.log('🎙️ Loading Fireflies meetings...');
+    setMeetingsLoading(true);
+    
     try {
       const response = await fetch('http://localhost:3002/api/fireflies/meetings');
+      console.log('📞 Fireflies response status:', response.status);
+      
       const data = await response.json();
-      setMeetings(data.meetings || []);
+      console.log('📊 Fireflies data:', data);
+      
+      if (data.success && data.meetings) {
+        setMeetings(data.meetings);
+        console.log(`✅ Loaded ${data.meetings.length} meetings from ${data.source || 'unknown'}`);
+      } else {
+        console.warn('⚠️ Fireflies API returned no meetings, using fallback');
+        setMeetings([]);
+      }
     } catch (error) {
-      // Mock data fallback
-      setMeetings([
-        {
-          id: '1',
-          title: 'Weekly Team Standup',
-          date: new Date(Date.now() - 86400000).toISOString(),
-          duration: 30,
-          participants: ['John Doe', 'Jane Smith', 'Mike Johnson'],
-          summary: 'Discussed project progress, upcoming deadlines, and resource allocation.',
-          actionItems: ['Update project timeline', 'Schedule client review', 'Prepare demo materials']
-        },
-        {
-          id: '2',
-          title: 'Client Feedback Session',
-          date: new Date(Date.now() - 172800000).toISOString(),
-          duration: 45,
-          participants: ['Sarah Wilson', 'Client Rep', 'Product Manager'],
-          summary: 'Reviewed latest features and collected valuable feedback from client stakeholders.',
-          actionItems: ['Implement requested changes', 'Schedule follow-up', 'Update documentation']
-        }
-      ]);
+      console.error('❌ Failed to load Fireflies meetings:', error);
+      setMeetings([]);
+    } finally {
+      setMeetingsLoading(false);
     }
   };
 
@@ -199,6 +196,10 @@ const App = () => {
 
   const showMeetingSummary = (meeting) => {
     setSelectedMeeting(meeting);
+  };
+
+  const refreshMeetings = () => {
+    loadMeetings();
   };
 
   return (
@@ -333,49 +334,120 @@ const App = () => {
                 </div>
               </div>
 
-              {/* Fireflies Meetings */}
+              {/* Enhanced Fireflies Meetings */}
               <div className="backdrop-blur-xl bg-white/10 border border-white/20 rounded-2xl shadow-2xl p-6">
                 <div className="flex items-center justify-between mb-6">
                   <h2 className="text-xl font-bold text-gray-900">🎙️ Meeting Summaries</h2>
-                  <span className="bg-purple-500/20 text-purple-800 text-sm font-medium px-3 py-1 rounded-full">Fireflies</span>
+                  <div className="flex items-center gap-2">
+                    <span className="bg-purple-500/20 text-purple-800 text-sm font-medium px-3 py-1 rounded-full">Fireflies</span>
+                    <button
+                      onClick={refreshMeetings}
+                      disabled={meetingsLoading}
+                      className="p-2 hover:bg-white/20 rounded-lg transition-colors disabled:opacity-50"
+                      title="Refresh meetings"
+                    >
+                      <svg className={`w-4 h-4 text-gray-600 ${meetingsLoading ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                    </button>
+                  </div>
                 </div>
                 
-                <div className="space-y-4 max-h-96 overflow-y-auto">
-                  {meetings.slice(0, 4).map(meeting => (
-                    <div key={meeting.id} className="backdrop-blur-md bg-white/20 border border-white/30 rounded-lg p-4 hover:bg-white/30 transition-all">
-                      <h4 className="font-semibold text-gray-900 text-sm mb-2">{meeting.title}</h4>
-                      <div className="text-xs text-gray-600 mb-2">🕒 {formatDateTime(meeting.date)} • {meeting.duration}min</div>
-                      <div className="text-xs text-gray-500 mb-3">
-                        👥 {meeting.participants?.slice(0, 2).join(', ')}
-                        {meeting.participants?.length > 2 && ` +${meeting.participants.length - 2} more`}
-                      </div>
-                      {meeting.summary && (
-                        <p className="text-xs text-gray-600 mb-3 line-clamp-2">{meeting.summary}</p>
-                      )}
-                      <button
-                        onClick={() => showMeetingSummary(meeting)}
-                        className="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white text-xs font-medium py-2 px-3 rounded-lg transition-all duration-200 hover:scale-105"
-                      >
-                        📋 View Summary
-                      </button>
+                {meetingsLoading ? (
+                  <div className="text-center py-12">
+                    <div className="w-16 h-16 bg-purple-100/20 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                      <div className="w-8 h-8 border-2 border-purple-500 border-t-transparent rounded-full animate-spin"></div>
                     </div>
-                  ))}
-                </div>
+                    <p className="text-gray-500 font-medium">Loading meetings...</p>
+                  </div>
+                ) : meetings.length === 0 ? (
+                  <div className="text-center py-12">
+                    <div className="w-16 h-16 bg-gray-100/20 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                      <span className="text-2xl text-gray-400">🎙️</span>
+                    </div>
+                    <p className="text-gray-500 font-medium">No meetings found</p>
+                    <p className="text-gray-400 text-sm mt-1">Recent meeting summaries will appear here</p>
+                    <button
+                      onClick={refreshMeetings}
+                      className="mt-4 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white text-xs font-medium py-2 px-4 rounded-lg transition-all duration-200 hover:scale-105"
+                    >
+                      Refresh Meetings
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-4 max-h-96 overflow-y-auto">
+                    {meetings.slice(0, 4).map(meeting => (
+                      <div key={meeting.id} className="backdrop-blur-md bg-white/20 border border-white/30 rounded-lg p-4 hover:bg-white/30 transition-all">
+                        <div className="flex items-start justify-between mb-2">
+                          <h4 className="font-semibold text-gray-900 text-sm">{meeting.title}</h4>
+                          {meeting.keywords && meeting.keywords.length > 0 && (
+                            <span className="text-xs bg-purple-100/50 text-purple-600 px-2 py-1 rounded-full">
+                              {meeting.keywords[0]}
+                            </span>
+                          )}
+                        </div>
+                        
+                        <div className="text-xs text-gray-600 mb-2">🕒 {formatDateTime(meeting.date)} • {meeting.duration}min</div>
+                        <div className="text-xs text-gray-500 mb-3">
+                          👥 {meeting.participants?.slice(0, 2).join(', ')}
+                          {meeting.participants?.length > 2 && ` +${meeting.participants.length - 2} more`}
+                        </div>
+                        
+                        {meeting.summary && (
+                          <p className="text-xs text-gray-600 mb-3 line-clamp-2">{meeting.summary}</p>
+                        )}
+                        
+                        {meeting.actionItems && meeting.actionItems.length > 0 && (
+                          <div className="text-xs text-orange-600 mb-3">
+                            ⚡ {meeting.actionItems.length} action item{meeting.actionItems.length > 1 ? 's' : ''}
+                          </div>
+                        )}
+                        
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => showMeetingSummary(meeting)}
+                            className="flex-1 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white text-xs font-medium py-2 px-3 rounded-lg transition-all duration-200 hover:scale-105"
+                          >
+                            📋 View Summary
+                          </button>
+                          {meeting.transcript_url && (
+                            <button
+                              onClick={() => window.open(meeting.transcript_url, '_blank')}
+                              className="bg-gray-500/20 hover:bg-gray-500/30 text-gray-700 text-xs font-medium py-2 px-3 rounded-lg transition-all duration-200"
+                            >
+                              📄
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* Meeting Summary Modal */}
+      {/* Enhanced Meeting Summary Modal */}
       {selectedMeeting && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-60 p-4">
-          <div className="backdrop-blur-xl bg-white/20 border border-white/30 rounded-2xl shadow-2xl max-w-2xl w-full max-h-[80vh] overflow-y-auto">
+          <div className="backdrop-blur-xl bg-white/20 border border-white/30 rounded-2xl shadow-2xl max-w-3xl w-full max-h-[80vh] overflow-y-auto">
             <div className="p-8">
               <div className="flex items-start justify-between mb-6">
                 <div>
                   <h3 className="text-2xl font-bold text-gray-900 mb-2">{selectedMeeting.title}</h3>
                   <p className="text-gray-600">{formatDateTime(selectedMeeting.date)} • {selectedMeeting.duration} minutes</p>
+                  {selectedMeeting.meeting_url && (
+                    <a 
+                      href={selectedMeeting.meeting_url} 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="text-blue-600 hover:text-blue-800 text-sm mt-1 inline-block"
+                    >
+                      🔗 Original Meeting Link
+                    </a>
+                  )}
                 </div>
                 <button 
                   onClick={() => setSelectedMeeting(null)}
@@ -398,6 +470,19 @@ const App = () => {
                     ))}
                   </div>
                 </div>
+
+                {selectedMeeting.keywords && selectedMeeting.keywords.length > 0 && (
+                  <div>
+                    <h4 className="font-semibold text-gray-900 mb-3">🏷️ Keywords</h4>
+                    <div className="flex flex-wrap gap-2">
+                      {selectedMeeting.keywords.map((keyword, index) => (
+                        <span key={index} className="bg-purple-500/20 text-purple-800 text-sm px-3 py-1 rounded-full">
+                          {keyword}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 
                 <div>
                   <h4 className="font-semibold text-gray-900 mb-3">📝 Summary</h4>
@@ -417,6 +502,17 @@ const App = () => {
                         </li>
                       ))}
                     </ul>
+                  </div>
+                )}
+
+                {selectedMeeting.transcript_url && (
+                  <div className="pt-4 border-t border-white/20">
+                    <button
+                      onClick={() => window.open(selectedMeeting.transcript_url, '_blank')}
+                      className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white px-6 py-3 rounded-lg font-medium transition-all duration-200 hover:scale-105"
+                    >
+                      📄 View Full Transcript
+                    </button>
                   </div>
                 )}
               </div>
