@@ -5,8 +5,6 @@ const http = require('http');
 const socketIo = require('socket.io');
 const cors = require('cors');
 const fetch = require('node-fetch');
-const { google } = require('googleapis');
-
 
 const app = express();
 const server = http.createServer(app);
@@ -24,10 +22,12 @@ app.use(express.json());
 const NotionService = require('./src/services/notionService');
 const IntegrationService = require('./src/services/integrationService');
 const SupabaseService = require('./src/services/supabaseService');
+const FirefliesService = require('./src/services/firefliesService');
 
 const notionService = new NotionService();
 const integrationService = new IntegrationService();
 const supabaseService = new SupabaseService();
+const firefliesService = new FirefliesService();
 
 console.log('🚀 Starting Realtime AI Dashboard Backend...');
 
@@ -399,16 +399,138 @@ app.post('/api/ai-test', async (req, res) => {
   }
 });
 
-// Fireflies meetings endpoint
+// Enhanced Fireflies meetings endpoint
 app.get('/api/fireflies/meetings', async (req, res) => {
   try {
-    // Mock successful response
+    console.log('📞 Fetching Fireflies meetings...');
+    
+    // Try to get real Fireflies data first
+    let meetings = [];
+    
+    if (process.env.FIREFLIES_API_KEY) {
+      try {
+        const firefliesResult = await firefliesService.getRecentTranscripts(5);
+        if (firefliesResult.success && firefliesResult.transcripts) {
+          meetings = firefliesResult.transcripts.map(transcript => ({
+            id: transcript.id,
+            title: transcript.title || 'Untitled Meeting',
+            date: transcript.date || new Date().toISOString(),
+            duration: transcript.duration || 30,
+            participants: transcript.participants?.map(p => p.name) || ['Unknown'],
+            summary: transcript.summary?.overview || 'No summary available',
+            actionItems: transcript.summary?.action_items || [],
+            keywords: transcript.summary?.keywords || [],
+            meeting_url: transcript.meeting_url,
+            transcript_url: `https://app.fireflies.ai/view/${transcript.id}`
+          }));
+          console.log(`✅ Loaded ${meetings.length} Fireflies meetings`);
+        }
+      } catch (error) {
+        console.log('⚠️ Fireflies API error, using mock data:', error.message);
+      }
+    }
+    
+    // Fallback to enhanced mock data if no real data
+    if (meetings.length === 0) {
+      meetings = [
+        {
+          id: 'ff_001',
+          title: 'Weekly Product Sync',
+          date: new Date(Date.now() - 86400000).toISOString(),
+          duration: 45,
+          participants: ['Sarah Johnson', 'Mike Chen', 'Emma Wilson', 'David Rodriguez'],
+          summary: 'Discussed Q1 roadmap priorities, reviewed user feedback from latest release, and aligned on upcoming feature development. Team identified three critical bugs that need immediate attention.',
+          actionItems: [
+            'Sarah to prioritize bug fixes for next sprint',
+            'Mike to schedule user interview sessions',
+            'Emma to update design specs for mobile app',
+            'David to prepare technical architecture review'
+          ],
+          keywords: ['roadmap', 'user feedback', 'bugs', 'mobile app'],
+          meeting_url: 'https://zoom.us/j/mock-meeting-1',
+          transcript_url: 'https://app.fireflies.ai/view/mock-1'
+        },
+        {
+          id: 'ff_002',
+          title: 'Client Onboarding Review',
+          date: new Date(Date.now() - 172800000).toISOString(),
+          duration: 30,
+          participants: ['Alex Thompson', 'Jennifer Lee', 'Robert Kim'],
+          summary: 'Reviewed onboarding flow for new enterprise clients. Identified bottlenecks in the signup process and discussed solutions to reduce time-to-value.',
+          actionItems: [
+            'Alex to redesign signup flow wireframes',
+            'Jennifer to analyze user drop-off points',
+            'Robert to implement automated welcome emails'
+          ],
+          keywords: ['onboarding', 'enterprise', 'signup', 'automation'],
+          meeting_url: 'https://zoom.us/j/mock-meeting-2',
+          transcript_url: 'https://app.fireflies.ai/view/mock-2'
+        },
+        {
+          id: 'ff_003',
+          title: 'Marketing Strategy Session',
+          date: new Date(Date.now() - 259200000).toISOString(),
+          duration: 60,
+          participants: ['Lisa Park', 'Tom Anderson', 'Maria Garcia', 'Kevin Wong'],
+          summary: 'Planned Q2 marketing campaigns focusing on social media engagement and content marketing. Discussed budget allocation and partnership opportunities.',
+          actionItems: [
+            'Lisa to finalize content calendar',
+            'Tom to reach out to potential partners',
+            'Maria to create social media templates',
+            'Kevin to set up campaign tracking analytics'
+          ],
+          keywords: ['marketing', 'social media', 'content', 'partnerships', 'analytics'],
+          meeting_url: 'https://zoom.us/j/mock-meeting-3',
+          transcript_url: 'https://app.fireflies.ai/view/mock-3'
+        },
+        {
+          id: 'ff_004',
+          title: 'Technical Architecture Review',
+          date: new Date(Date.now() - 345600000).toISOString(),
+          duration: 90,
+          participants: ['John Smith', 'Amy Chen', 'Carlos Rodriguez', 'Priya Patel'],
+          summary: 'Deep dive into system scalability challenges and proposed solutions. Discussed microservices migration timeline and database optimization strategies.',
+          actionItems: [
+            'John to draft migration plan document',
+            'Amy to benchmark database performance',
+            'Carlos to research container orchestration',
+            'Priya to design API versioning strategy'
+          ],
+          keywords: ['architecture', 'scalability', 'microservices', 'database', 'API'],
+          meeting_url: 'https://zoom.us/j/mock-meeting-4',
+          transcript_url: 'https://app.fireflies.ai/view/mock-4'
+        }
+      ];
+      console.log('📋 Using enhanced mock Fireflies data');
+    }
+
     res.json({ 
       success: true, 
-      meetings: [] // Will use frontend mock data
+      meetings: meetings,
+      source: process.env.FIREFLIES_API_KEY ? 'fireflies' : 'mock',
+      count: meetings.length
     });
+    
   } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+    console.error('❌ Fireflies endpoint error:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message,
+      meetings: []
+    });
+  }
+});
+
+// Test Fireflies connection
+app.get('/api/fireflies/test', async (req, res) => {
+  try {
+    const result = await firefliesService.testConnection();
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
   }
 });
 
@@ -448,6 +570,7 @@ server.listen(PORT, () => {
   console.log(`🔗 Health check: http://localhost:${PORT}/api/health`);
   console.log(`📅 Calendar API: http://localhost:${PORT}/api/calendar/events`);
   console.log(`🤖 AI Chat: http://localhost:${PORT}/api/ai-chat`);
+  console.log(`🎙️ Fireflies: http://localhost:${PORT}/api/fireflies/meetings`);
   console.log(`✅ All integrations mocked as connected for demo`);
 });
 
