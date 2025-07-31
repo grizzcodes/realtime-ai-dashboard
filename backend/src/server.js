@@ -3,7 +3,10 @@ const express = require('express');
 const cors = require('cors');
 const http = require('http');
 const socketIo = require('socket.io');
+const firefliesRoute = require('./routes/fireflies');
 require('dotenv').config();
+
+
 
 const app = express();
 const server = http.createServer(app);
@@ -35,6 +38,7 @@ const taskManager = new TaskManager();
 
 // Use routes
 app.use('/api', aiChatRoute);
+app.use('/api/fireflies', firefliesRoute);
 
 // Test endpoint to check API connections
 app.get('/api/health', async (req, res) => {
