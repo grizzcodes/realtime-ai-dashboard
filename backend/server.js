@@ -92,7 +92,7 @@ async function getAIResponse(message, provider) {
       body: JSON.stringify({
         model: 'claude-3-sonnet-20240229',
         max_tokens: 500,
-        messages: [{ role: 'user', content: `${systemPrompt}\n\nUser: ${message}` }]
+        messages: [{ role: 'user', content: `${systemPrompt}\\n\\nUser: ${message}` }]
       })
     });
     const data = await response.json();
@@ -281,6 +281,35 @@ app.get('/api/test/:integration', async (req, res) => {
   }
 });
 
+// Calendar API Routes
+app.get('/api/calendar/events', async (req, res) => {
+  try {
+    const maxResults = parseInt(req.query.maxResults) || 10;
+    const result = await integrationService.getUpcomingEvents(maxResults);
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.get('/api/calendar/today', async (req, res) => {
+  try {
+    const result = await integrationService.getTodaysEvents();
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.post('/api/calendar/events', async (req, res) => {
+  try {
+    const result = await integrationService.createCalendarEvent(req.body);
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 app.get('/api/tasks', async (req, res) => {
   try {
     const notionResult = await notionService.getTasks();
@@ -361,6 +390,7 @@ server.listen(PORT, () => {
   console.log(`📊 Dashboard: http://localhost:3000`);
   console.log(`🔐 Google OAuth: http://localhost:${PORT}/auth/google`);
   console.log(`🔗 Health check: http://localhost:${PORT}/api/health`);
+  console.log(`📅 Calendar API: http://localhost:${PORT}/api/calendar/events`);
 });
 
 module.exports = { app, server, io };

@@ -1,6 +1,7 @@
 // backend/src/services/integrationService.js
 const { google } = require('googleapis');
 const fetch = require('node-fetch');
+const CalendarService = require('./calendarService');
 
 class IntegrationService {
   constructor() {
@@ -15,6 +16,8 @@ class IntegrationService {
         refresh_token: process.env.GOOGLE_REFRESH_TOKEN
       });
     }
+
+    this.calendarService = new CalendarService();
   }
 
   async testGmailConnection() {
@@ -27,33 +30,9 @@ class IntegrationService {
         };
       }
 
-      // First refresh the access token
-      const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({
-          client_id: process.env.GOOGLE_CLIENT_ID,
-          client_secret: process.env.GOOGLE_CLIENT_SECRET,
-          refresh_token: process.env.GOOGLE_REFRESH_TOKEN,
-          grant_type: 'refresh_token'
-        })
-      });
-
-      const tokens = await tokenResponse.json();
-      
-      if (tokens.error) {
-        return {
-          success: false,
-          error: `Token refresh failed: ${tokens.error}`,
-          needsAuth: true
-        };
-      }
-
-      // Set the new access token
-      this.googleAuth.setCredentials({
-        refresh_token: process.env.GOOGLE_REFRESH_TOKEN,
-        access_token: tokens.access_token
-      });
+      // Refresh access token using oauth2Client
+      const { credentials } = await this.googleAuth.refreshAccessToken();
+      this.googleAuth.setCredentials(credentials);
 
       const gmail = google.gmail({ version: 'v1', auth: this.googleAuth });
       const response = await gmail.users.getProfile({ userId: 'me' });
@@ -64,6 +43,7 @@ class IntegrationService {
         emailAddress: response.data.emailAddress
       };
     } catch (error) {
+      console.error('Gmail connection error:', error);
       return {
         success: false,
         error: `Gmail failed: ${error.message}`,
@@ -73,58 +53,7 @@ class IntegrationService {
   }
 
   async testCalendarConnection() {
-    try {
-      if (!process.env.GOOGLE_REFRESH_TOKEN) {
-        return { 
-          success: false, 
-          error: 'OAuth setup required. Visit /auth/google',
-          needsAuth: true
-        };
-      }
-
-      // First refresh the access token
-      const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({
-          client_id: process.env.GOOGLE_CLIENT_ID,
-          client_secret: process.env.GOOGLE_CLIENT_SECRET,
-          refresh_token: process.env.GOOGLE_REFRESH_TOKEN,
-          grant_type: 'refresh_token'
-        })
-      });
-
-      const tokens = await tokenResponse.json();
-      
-      if (tokens.error) {
-        return {
-          success: false,
-          error: `Token refresh failed: ${tokens.error}`,
-          needsAuth: true
-        };
-      }
-
-      // Set the new access token
-      this.googleAuth.setCredentials({
-        refresh_token: process.env.GOOGLE_REFRESH_TOKEN,
-        access_token: tokens.access_token
-      });
-
-      const calendar = google.calendar({ version: 'v3', auth: this.googleAuth });
-      const response = await calendar.calendarList.list();
-      
-      return {
-        success: true,
-        message: `Connected: ${response.data.items.length} calendars`,
-        calendars: response.data.items.length
-      };
-    } catch (error) {
-      return {
-        success: false,
-        error: `Calendar failed: ${error.message}`,
-        needsAuth: error.code === 401 || error.message.includes('invalid_grant')
-      };
-    }
+    return await this.calendarService.testConnection();
   }
 
   async testSlackConnection() {
@@ -229,6 +158,19 @@ class IntegrationService {
         total: 4
       }
     };
+  }
+
+  // Calendar integration methods
+  async getUpcomingEvents(maxResults = 10) {
+    return await this.calendarService.getUpcomingEvents(maxResults);
+  }
+
+  async getTodaysEvents() {
+    return await this.calendarService.getTodaysEvents();
+  }
+
+  async createCalendarEvent(eventData) {
+    return await this.calendarService.createEvent(eventData);
   }
 }
 
