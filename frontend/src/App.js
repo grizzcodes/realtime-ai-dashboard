@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import io from 'socket.io-client';
 import './App.css';
-import AIChatbox from './components/AIChatbox';
+import FloatingChatbox from './components/FloatingChatbox';
 
 const App = () => {
   const [tasks, setTasks] = useState([]);
@@ -256,8 +256,8 @@ const App = () => {
         )}
       </div>
 
-      {/* AI Chatbox */}
-      <AIChatbox socket={socket} apiStatus={apiStatus} />
+      {/* Floating AI Chatbox */}
+      <FloatingChatbox isAdmin={true} />
     </div>
   );
 };
