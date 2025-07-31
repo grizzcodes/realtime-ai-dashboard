@@ -1,6 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 
 const AIChatbox = ({ socket, apiStatus }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [isMinimized, setIsMinimized] = useState(false);
   const [messages, setMessages] = useState([
     {
       role: 'assistant',
@@ -77,83 +79,137 @@ const AIChatbox = ({ socket, apiStatus }) => {
     }
   };
 
+  // Floating button when closed
+  if (!isOpen) {
+    return (
+      <div className="fixed bottom-6 right-6 z-50">
+        <button
+          onClick={() => setIsOpen(true)}
+          className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white rounded-full p-4 shadow-2xl transition-all duration-300 hover:scale-110 animate-pulse"
+        >
+          <div className="flex items-center gap-2">
+            <span className="text-2xl">🤖</span>
+            <span className="hidden sm:block font-semibold text-sm">AI Assistant</span>
+          </div>
+        </button>
+      </div>
+    );
+  }
+
+  // Full chatbox
   return (
-    <div className="fixed bottom-6 right-6 w-80 h-96 bg-white rounded-xl shadow-2xl border border-gray-200 flex flex-col z-50">
+    <div className={`fixed bottom-6 right-6 bg-white rounded-2xl shadow-2xl border border-gray-200 flex flex-col z-50 transition-all duration-300 ${
+      isMinimized ? 'h-16 w-80' : 'h-96 w-80'
+    }`}>
       {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-t-xl">
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 bg-white/20 rounded-lg flex items-center justify-center">
-            <span className="text-lg">🤖</span>
+      <div className="flex items-center justify-between p-4 border-b bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-t-2xl">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center">
+            <span className="text-xl">🤖</span>
           </div>
           <div>
             <div className="font-semibold text-sm">AI Assistant</div>
             <div className="text-xs text-blue-100">Always here to help</div>
           </div>
         </div>
-        <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
-      </div>
-
-      {/* Messages */}
-      <div className="flex-1 p-4 overflow-y-auto bg-gray-50">
-        {messages.map((message, index) => (
-          <div
-            key={index}
-            className={`mb-4 ${
-              message.role === 'user' ? 'text-right' : 'text-left'
-            }`}
-          >
-            <div
-              className={`inline-block max-w-[85%] p-3 rounded-2xl text-sm ${
-                message.role === 'user'
-                  ? 'bg-blue-600 text-white rounded-br-md'
-                  : 'bg-white text-gray-800 shadow-sm border rounded-bl-md'
-              }`}
-            >
-              {message.content}
-            </div>
-            <div className="text-xs text-gray-400 mt-1 px-1">
-              {message.timestamp.toLocaleTimeString([], { 
-                hour: '2-digit', 
-                minute: '2-digit' 
-              })}
-            </div>
-          </div>
-        ))}
-        {isLoading && (
-          <div className="text-left mb-4">
-            <div className="inline-block bg-white text-gray-800 p-3 rounded-2xl rounded-bl-md shadow-sm border">
-              <div className="flex items-center gap-1">
-                <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
-                <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
-                <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
-              </div>
-            </div>
-          </div>
-        )}
-        <div ref={messagesEndRef} />
-      </div>
-
-      {/* Input */}
-      <div className="p-4 border-t bg-white rounded-b-xl">
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={inputValue}
-            onChange={(e) => setInputValue(e.target.value)}
-            onKeyPress={handleKeyPress}
-            placeholder="Type your message..."
-            className="flex-1 px-3 py-2 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            disabled={isLoading}
-          />
+        <div className="flex items-center gap-2">
+          <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
           <button
-            onClick={sendMessage}
-            disabled={isLoading || !inputValue.trim()}
-            className="px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm font-medium"
+            onClick={() => setIsMinimized(!isMinimized)}
+            className="text-white hover:text-gray-200 transition-colors p-1 rounded hover:bg-white/10"
           >
-            {isLoading ? '⏳' : '📤'}
+            {isMinimized ? (
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+              </svg>
+            ) : (
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            )}
+          </button>
+          <button
+            onClick={() => setIsOpen(false)}
+            className="text-white hover:text-gray-200 transition-colors p-1 rounded hover:bg-white/10"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
           </button>
         </div>
       </div>
+
+      {!isMinimized && (
+        <>
+          {/* Messages */}
+          <div className="flex-1 p-4 overflow-y-auto bg-gradient-to-b from-gray-50 to-white">
+            {messages.map((message, index) => (
+              <div
+                key={index}
+                className={`mb-4 ${
+                  message.role === 'user' ? 'text-right' : 'text-left'
+                }`}
+              >
+                <div
+                  className={`inline-block max-w-[85%] p-3 text-sm transition-all duration-200 hover:scale-105 ${
+                    message.role === 'user'
+                      ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-2xl rounded-br-md shadow-lg'
+                      : 'bg-white text-gray-800 shadow-md border border-gray-100 rounded-2xl rounded-bl-md'
+                  }`}
+                >
+                  {message.content}
+                </div>
+                <div className="text-xs text-gray-400 mt-1 px-1">
+                  {message.timestamp.toLocaleTimeString([], { 
+                    hour: '2-digit', 
+                    minute: '2-digit' 
+                  })}
+                </div>
+              </div>
+            ))}
+            {isLoading && (
+              <div className="text-left mb-4">
+                <div className="inline-block bg-white text-gray-800 p-3 rounded-2xl rounded-bl-md shadow-md border border-gray-100">
+                  <div className="flex items-center gap-1">
+                    <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce"></div>
+                    <div className="w-2 h-2 bg-purple-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+                    <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                  </div>
+                </div>
+              </div>
+            )}
+            <div ref={messagesEndRef} />
+          </div>
+
+          {/* Input */}
+          <div className="p-4 border-t bg-white rounded-b-2xl">
+            <div className="flex gap-3">
+              <input
+                type="text"
+                value={inputValue}
+                onChange={(e) => setInputValue(e.target.value)}
+                onKeyPress={handleKeyPress}
+                placeholder="Type your message..."
+                className="flex-1 px-4 py-3 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                disabled={isLoading}
+              />
+              <button
+                onClick={sendMessage}
+                disabled={isLoading || !inputValue.trim()}
+                className="px-5 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:from-blue-700 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 text-sm font-medium hover:scale-105"
+              >
+                {isLoading ? (
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                ) : (
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                  </svg>
+                )}
+              </button>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 };
