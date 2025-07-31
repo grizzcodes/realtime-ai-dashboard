@@ -7,7 +7,7 @@ class NotionService {
       auth: process.env.NOTION_API_KEY,
     }) : null;
     this.databaseId = process.env.NOTION_DATABASE_ID || null;
-    this.statusOptions = []; // Store available status options
+    this.statusOptions = [];
   }
 
   async testConnection() {
@@ -61,14 +61,13 @@ class NotionService {
     try {
       console.log(`📝 Querying Notion database: ${this.databaseId}`);
       
-      // First, get database info and status options
+      // Get database info and status options
       let dbInfo;
       try {
         dbInfo = await this.notion.databases.retrieve({
           database_id: this.databaseId
         });
         console.log(`✅ Database found: "${dbInfo.title[0]?.plain_text || 'Untitled'}"`);
-        console.log(`🔗 Properties: ${Object.keys(dbInfo.properties).join(', ')}`);
         
         // Get status options
         const statusProperty = dbInfo.properties['Status'];
@@ -78,7 +77,6 @@ class NotionService {
             color: option.color,
             id: option.id
           }));
-          console.log('📊 Status options found:', this.statusOptions.map(opt => `${opt.name} (${opt.color})`).join(', '));
         }
         
       } catch (dbError) {
@@ -92,55 +90,59 @@ class NotionService {
         throw dbError;
       }
       
-      // Query ALL tasks without any filtering - let frontend handle filtering
-      console.log('📋 Fetching ALL tasks from Notion (no server-side filtering)...');
-      const response = await this.notion.databases.query({
+      // Fetch NOT DONE tasks with filters matching your Notion setup
+      console.log('📋 Fetching NOT DONE tasks with filters...');
+      const notDoneResponse = await this.notion.databases.query({
         database_id: this.databaseId,
-        page_size: 100, // Notion's max per request
+        filter: {
+          property: 'Status',
+          status: {
+            does_not_equal: 'Done'
+          }
+        },
         sorts: [
           {
-            property: 'Status',
+            property: 'Assigned', // Person Assigned filter (prioritize assigned tasks)
             direction: 'ascending'
+          },
+          {
+            property: 'Due', // Due Date descending
+            direction: 'descending'
           },
           {
             property: 'Priority',
             direction: 'ascending'
           }
-        ]
+        ],
+        page_size: 100
       });
 
-      let allTasks = [...response.results];
-      
-      // If there are more pages, fetch them up to 200 total
-      let cursor = response.next_cursor;
-      let pageCount = 1;
-      
-      while (cursor && allTasks.length < 200) {
-        console.log(`📋 Fetching page ${pageCount + 1}...`);
-        const nextPage = await this.notion.databases.query({
-          database_id: this.databaseId,
-          page_size: Math.min(100, 200 - allTasks.length),
-          start_cursor: cursor,
-          sorts: [
-            {
-              property: 'Status',
-              direction: 'ascending'
-            },
-            {
-              property: 'Priority',
-              direction: 'ascending'
-            }
-          ]
-        });
-        
-        allTasks = [...allTasks, ...nextPage.results];
-        cursor = nextPage.next_cursor;
-        pageCount++;
-        
-        if (!cursor) break;
-      }
+      // Fetch COMPLETED tasks (last 10)
+      console.log('📋 Fetching last 10 DONE tasks...');
+      const doneResponse = await this.notion.databases.query({
+        database_id: this.databaseId,
+        filter: {
+          property: 'Status',
+          status: {
+            equals: 'Done'
+          }
+        },
+        sorts: [
+          {
+            property: 'Due', // Most recently completed first
+            direction: 'descending'
+          }
+        ],
+        page_size: 10 // Only last 10 done tasks
+      });
 
-      console.log(`📋 Found ${allTasks.length} total pages in Notion (fetched ${pageCount} pages)`);
+      const notDoneTasks = notDoneResponse.results || [];
+      const doneTasks = doneResponse.results.slice(0, 10) || []; // Ensure max 10
+
+      console.log(`📊 Found ${notDoneTasks.length} not done tasks, ${doneTasks.length} recent done tasks`);
+      
+      // Combine tasks: NOT DONE first, then 10 most recent DONE
+      const allTasks = [...notDoneTasks, ...doneTasks];
       
       if (allTasks.length === 0) {
         return { 
@@ -151,48 +153,51 @@ class NotionService {
         };
       }
 
-      // Parse ALL tasks (no backend filtering)
+      // Parse tasks
       const parsedTasks = allTasks.map(page => this.parseNotionPage(page, dbInfo.properties));
       
-      // Count tasks by status for debugging
-      const statusCounts = {};
-      parsedTasks.forEach(task => {
-        const status = task.rawStatus || 'Unknown';
-        statusCounts[status] = (statusCounts[status] || 0) + 1;
-      });
-      
-      console.log('📊 RAW task counts by status (before any filtering):');
-      Object.entries(statusCounts).forEach(([status, count]) => {
-        console.log(`   ${status}: ${count} tasks`);
-      });
-      
-      // Sort to put "Not Done Yet" first, but return ALL tasks
+      // Apply final sorting: NOT DONE first (by person assigned, then due date), then DONE
       const sortedTasks = parsedTasks.sort((a, b) => {
-        // First priority: "Not Done Yet" tasks come first
-        const aIsNotDone = a.rawStatus?.toLowerCase() === 'not done yet';
-        const bIsNotDone = b.rawStatus?.toLowerCase() === 'not done yet';
+        // First: NOT DONE tasks come before DONE tasks
+        const aIsDone = a.rawStatus?.toLowerCase() === 'done';
+        const bIsDone = b.rawStatus?.toLowerCase() === 'done';
         
-        if (aIsNotDone && !bIsNotDone) return -1;
-        if (!aIsNotDone && bIsNotDone) return 1;
+        if (!aIsDone && bIsDone) return -1; // a (not done) comes first
+        if (aIsDone && !bIsDone) return 1;  // b (not done) comes first
         
-        // Second priority: Within same status, sort by urgency (higher first)
-        if (a.urgency !== b.urgency) {
-          return b.urgency - a.urgency;
+        // Within same completion status
+        if (!aIsDone && !bIsDone) {
+          // Both not done: sort by assigned (assigned tasks first), then due date
+          const aAssigned = a.assignee !== 'Unassigned';
+          const bAssigned = b.assignee !== 'Unassigned';
+          
+          if (aAssigned && !bAssigned) return -1;
+          if (!aAssigned && bAssigned) return 1;
+          
+          // Then by due date (descending - most urgent first)
+          if (a.deadline && b.deadline) {
+            return new Date(b.deadline) - new Date(a.deadline);
+          }
+          if (a.deadline && !b.deadline) return -1;
+          if (!a.deadline && b.deadline) return 1;
         }
         
-        // Third priority: Then by assignee
-        return a.assignee.localeCompare(b.assignee);
+        // Done tasks already sorted by due date from query
+        return 0;
       });
       
-      console.log(`✅ Returning ALL ${sortedTasks.length} tasks to frontend (no backend filtering)`);
-      console.log(`🔥 "Not Done Yet" tasks will appear first, but ALL statuses included`);
-      console.log(`💡 Frontend can now filter by status as needed`);
+      console.log(`✅ Returning ${sortedTasks.length} tasks (${notDoneTasks.length} not done + ${doneTasks.length} recent done)`);
       
       return { 
         success: true, 
         tasks: sortedTasks, 
         statusOptions: this.statusOptions,
-        databaseId: this.databaseId 
+        databaseId: this.databaseId,
+        summary: {
+          notDone: notDoneTasks.length,
+          recentDone: doneTasks.length,
+          total: sortedTasks.length
+        }
       };
     } catch (error) {
       console.error('❌ Notion API error:', error);
@@ -237,7 +242,6 @@ class NotionService {
         case 'rollup':
           return prop.rollup?.array || prop.rollup?.number || null;
         case 'status':
-          // Handle the status property type - return both name and color
           if (prop.status) {
             const statusOption = this.statusOptions.find(opt => opt.name === prop.status.name);
             return {
@@ -248,12 +252,11 @@ class NotionService {
           }
           return null;
         default:
-          console.log(`⚠️ Unknown property type: ${prop.type} for property`);
           return null;
       }
     };
 
-    // Map your actual Notion properties with fallbacks
+    // Map your actual Notion properties
     const taskName = getPropertyValue(pageProps['Task name']) || 
                      getPropertyValue(pageProps['Name']) || 
                      getPropertyValue(pageProps['Title']) || 
@@ -273,18 +276,13 @@ class NotionService {
     const primaryAssignee = assignedUsers.length > 0 ? assignedUsers[0].name : 'Unassigned';
     const allAssignees = assignedUsers.map(user => user.name);
 
-    // Debug individual task parsing
-    if (Math.random() < 0.01) { // Log 1% of tasks for debugging
-      console.log(`🔍 Sample task: "${taskName}" | Status: "${statusObject.name}" | Assigned: ${primaryAssignee}`);
-    }
-
     return {
       id: `notion-${page.id}`,
       notionId: page.id,
       title: taskName,
       status: this.mapNotionStatusToOurs(statusObject.name),
-      rawStatus: statusObject.name, // Keep original status name
-      statusColor: statusObject.color, // Keep original status color
+      rawStatus: statusObject.name,
+      statusColor: statusObject.color,
       assignee: primaryAssignee,
       assignedUsers: assignedUsers,
       keyPeople: allAssignees,
@@ -324,7 +322,7 @@ class NotionService {
   }
 
   mapNotionPriorityToUrgency(priority) {
-    if (!priority) return 3; // Default to medium
+    if (!priority) return 3;
     
     switch (priority.toLowerCase()) {
       case 'urgent':
