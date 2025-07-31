@@ -199,6 +199,7 @@ const AIChatbox = ({ socket, apiStatus }) => {
 
 const App = () => {
   const [tasks, setTasks] = useState([]);
+  const [upcomingEvents, setUpcomingEvents] = useState([]);
   const [isConnected, setIsConnected] = useState(false);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [apiStatus, setApiStatus] = useState({});
@@ -217,6 +218,7 @@ const App = () => {
     
     loadTasks();
     loadApiStatus();
+    loadUpcomingEvents();
       
     return () => newSocket.close();
   }, []);
@@ -239,6 +241,45 @@ const App = () => {
     } catch (error) {
       console.error('Failed to load API status:', error);
     }
+  };
+
+  const loadUpcomingEvents = async () => {
+    try {
+      const response = await fetch('http://localhost:3002/api/calendar/events?maxResults=5');
+      const data = await response.json();
+      if (data.success) {
+        setUpcomingEvents(data.events || []);
+      }
+    } catch (error) {
+      console.error('Failed to load upcoming events:', error);
+    }
+  };
+
+  const formatEventTime = (dateTime) => {
+    const date = new Date(dateTime);
+    const today = new Date();
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    
+    const isToday = date.toDateString() === today.toDateString();
+    const isTomorrow = date.toDateString() === tomorrow.toDateString();
+    
+    const timeStr = date.toLocaleTimeString('en-US', { 
+      hour: 'numeric', 
+      minute: '2-digit',
+      hour12: true 
+    });
+    
+    if (isToday) return `Today at ${timeStr}`;
+    if (isTomorrow) return `Tomorrow at ${timeStr}`;
+    
+    return date.toLocaleDateString('en-US', { 
+      month: 'short', 
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true
+    });
   };
 
   const testAI = async () => {
@@ -386,21 +427,51 @@ const App = () => {
               )}
             </div>
 
-            <div className="bg-white rounded-lg shadow p-6">
-              <h2 className="text-xl font-bold mb-4">📊 Integration Status</h2>
-              <div className="space-y-3">
-                {integrations.map(integration => (
-                  <div key={integration.name} className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <span>{integration.icon}</span>
-                      <span className="font-medium">{integration.name}</span>
-                      {integration.category === 'ai' && (
-                        <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">AI</span>
-                      )}
+            <div className="space-y-6">
+              <div className="bg-white rounded-lg shadow p-6">
+                <h2 className="text-xl font-bold mb-4">📊 Integration Status</h2>
+                <div className="space-y-3">
+                  {integrations.map(integration => (
+                    <div key={integration.name} className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span>{integration.icon}</span>
+                        <span className="font-medium">{integration.name}</span>
+                        {integration.category === 'ai' && (
+                          <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">AI</span>
+                        )}
+                      </div>
+                      <div className={`w-3 h-3 rounded-full ${getStatusColor(integration.status)}`}></div>
                     </div>
-                    <div className={`w-3 h-3 rounded-full ${getStatusColor(integration.status)}`}></div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="bg-white rounded-lg shadow p-6">
+                <h2 className="text-xl font-bold mb-4">📅 Upcoming Events</h2>
+                {apiStatus.calendar?.success ? (
+                  upcomingEvents.length === 0 ? (
+                    <p className="text-gray-500 text-sm">No upcoming events</p>
+                  ) : (
+                    <div className="space-y-3">
+                      {upcomingEvents.map((event, i) => (
+                        <div key={i} className="border-l-4 border-blue-500 pl-3 py-2">
+                          <div className="font-medium text-sm">{event.summary}</div>
+                          <div className="text-xs text-gray-600">{formatEventTime(event.start)}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )
+                ) : (
+                  <div className="text-center py-4">
+                    <p className="text-gray-500 text-sm mb-2">Calendar not connected</p>
+                    <button 
+                      onClick={() => window.open('http://localhost:3002/auth/google', '_blank')}
+                      className="text-blue-500 text-sm hover:underline"
+                    >
+                      Connect Calendar
+                    </button>
                   </div>
-                ))}
+                )}
               </div>
             </div>
           </div>
