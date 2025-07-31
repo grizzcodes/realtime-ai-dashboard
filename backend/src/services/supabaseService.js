@@ -1,5 +1,6 @@
 // backend/src/services/supabaseService.js
 const { createClient } = require('@supabase/supabase-js');
+const { v4: uuidv4 } = require('uuid');
 
 class SupabaseService {
   constructor() {
@@ -11,6 +12,29 @@ class SupabaseService {
     } else {
       this.supabase = null;
     }
+  }
+
+  // Helper function to clean task ID for UUID format
+  cleanTaskId(taskId) {
+    if (!taskId) return uuidv4();
+    
+    // If it's already a valid UUID, return it
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    if (uuidRegex.test(taskId)) {
+      return taskId;
+    }
+    
+    // If it starts with "notion-", extract the UUID part
+    if (taskId.startsWith('notion-')) {
+      const uuidPart = taskId.replace('notion-', '');
+      // Check if the remaining part is a valid UUID
+      if (uuidRegex.test(uuidPart)) {
+        return uuidPart;
+      }
+    }
+    
+    // If we can't extract a valid UUID, generate a new one
+    return uuidv4();
   }
 
   async testConnection() {
@@ -116,14 +140,17 @@ class SupabaseService {
     if (!this.supabase) return { success: false, error: 'Supabase not configured' };
 
     try {
+      // Clean the task ID to ensure it's a valid UUID
+      const cleanId = this.cleanTaskId(task.id);
+      
       const { data, error } = await this.supabase
         .from('tasks')
         .upsert({
-          id: task.id,
-          title: task.title,
-          source: task.source,
+          id: cleanId,
+          title: task.title || 'Untitled Task',
+          source: task.source || 'notion',
           urgency: task.urgency || 3,
-          status: task.status,
+          status: task.status || 'pending',
           assignee: task.assignee,
           project: task.project,
           deadline: task.deadline,
