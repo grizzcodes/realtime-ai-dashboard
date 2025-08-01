@@ -1,3 +1,6 @@
+// backend/server.js - Gmail API Routes
+// Note: app and io are provided by main.js as global variables
+
 // Add Gmail archive endpoint
 app.post('/api/gmail/archive/:emailId', async (req, res) => {
   try {
@@ -63,3 +66,5 @@ app.get('/api/gmail/latest', async (req, res) => {
     });
   }
 });
+
+console.log('📧 Gmail API routes loaded');
