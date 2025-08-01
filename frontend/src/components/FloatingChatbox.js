@@ -37,7 +37,7 @@ const FloatingChatbox = ({ isAdmin = false }) => {
     setIsLoading(true);
 
     try {
-      const response = await fetch('http://localhost:3001/api/ai-chat', {
+      const response = await fetch('http://localhost:3002/api/ai-chat', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
