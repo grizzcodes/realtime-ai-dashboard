@@ -59,22 +59,22 @@ async function checkIntegrationStatus() {
     status.fireflies = { success: false, error: error.message };
   }
 
-  // Test Calendar/Gmail
+  // Test Calendar/Gmail - FIXED: Use correct method names
   try {
-    const calendarTest = await integrationService.testGoogleCalendar();
+    const calendarTest = await integrationService.testCalendarConnection();
     status.calendar = calendarTest;
   } catch (error) {
     status.calendar = { success: false, error: error.message };
   }
 
   try {
-    const gmailTest = await integrationService.testGmail();
+    const gmailTest = await integrationService.testGmailConnection();
     status.gmail = gmailTest;
   } catch (error) {
     status.gmail = { success: false, error: error.message };
   }
 
-  // Test AI Services
+  // Test AI Services - FIXED: Check environment variables properly
   status.openai = {
     success: !!process.env.OPENAI_API_KEY,
     message: process.env.OPENAI_API_KEY ? 'API key configured' : 'API key not configured'
@@ -133,10 +133,10 @@ app.get('/api/test/:integration', async (req, res) => {
         result = await firefliesService.testConnection();
         break;
       case 'calendar':
-        result = await integrationService.testGoogleCalendar();
+        result = await integrationService.testCalendarConnection();
         break;
       case 'gmail':
-        result = await integrationService.testGmail();
+        result = await integrationService.testGmailConnection();
         break;
       case 'openai':
         result = {
@@ -357,6 +357,15 @@ server.listen(PORT, () => {
   console.log(`📋 Tasks: http://localhost:${PORT}/api/tasks`);
   console.log(`🎙️ Fireflies: http://localhost:${PORT}/api/fireflies/meetings`);
   console.log(`✅ Real data integration enabled`);
+  
+  // ADDED: Log environment variable status on startup
+  console.log('\n🔧 Environment Status:');
+  console.log('======================');
+  console.log('NOTION_API_KEY:', process.env.NOTION_API_KEY ? '✅ Set' : '❌ Missing');
+  console.log('OPENAI_API_KEY:', process.env.OPENAI_API_KEY ? '✅ Set' : '❌ Missing');
+  console.log('ANTHROPIC_API_KEY:', process.env.ANTHROPIC_API_KEY ? '✅ Set' : '❌ Missing');
+  console.log('FIREFLIES_API_KEY:', process.env.FIREFLIES_API_KEY ? '✅ Set' : '❌ Missing');
+  console.log('GOOGLE_CLIENT_ID:', process.env.GOOGLE_CLIENT_ID ? '✅ Set' : '❌ Missing');
 });
 
 module.exports = { app, server, io };
