@@ -20,6 +20,28 @@ class OpenAIService {
     }
   }
 
+  async processMessage(message, conversationHistory = []) {
+    if (!this.client) {
+      return { success: false, error: 'OpenAI not configured' };
+    }
+
+    try {
+      const completion = await this.client.chat.completions.create({
+        model: 'gpt-4',
+        messages: [{ role: 'user', content: message }],
+        max_tokens: 1000,
+      });
+
+      return { 
+        success: true, 
+        content: completion.choices[0].message.content,
+        response: completion.choices[0].message.content 
+      };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  }
+
   async generateTasksFromText(text) {
     if (!this.client) {
       return { success: false, error: 'OpenAI not configured' };
