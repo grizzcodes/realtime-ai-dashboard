@@ -90,15 +90,36 @@ class CalendarService {
       
       return {
         success: true,
-        events: events.map(event => ({
-          id: event.id,
-          summary: event.summary || 'No title',
-          start: event.start?.dateTime || event.start?.date,
-          end: event.end?.dateTime || event.end?.date,
-          description: event.description,
-          location: event.location,
-          attendees: event.attendees?.map(a => a.email) || []
-        }))
+        events: events.map(event => {
+          // Enhanced attendee processing
+          const attendees = event.attendees || [];
+          const processedAttendees = attendees.map(attendee => ({
+            email: attendee.email,
+            displayName: attendee.displayName || attendee.email.split('@')[0],
+            responseStatus: attendee.responseStatus,
+            organizer: attendee.organizer || false,
+            optional: attendee.optional || false
+          }));
+
+          return {
+            id: event.id,
+            title: event.summary || 'Untitled Event', // FIXED: Always include title
+            summary: event.summary || 'Untitled Event',
+            start: event.start?.dateTime || event.start?.date,
+            end: event.end?.dateTime || event.end?.date,
+            description: event.description,
+            location: event.location || 'No location',
+            attendees: processedAttendees, // Enhanced attendee data
+            attendeeEmails: attendees.map(a => a.email), // Simple email list for backwards compatibility
+            organizer: event.organizer,
+            hangoutLink: event.hangoutLink,
+            meetLink: event.conferenceData?.conferenceSolution?.name === 'Google Meet' ? 
+                     event.conferenceData.entryPoints?.find(ep => ep.entryPointType === 'video')?.uri : null,
+            status: event.status,
+            created: event.created,
+            updated: event.updated
+          };
+        })
       };
     } catch (error) {
       return {
@@ -125,10 +146,24 @@ class CalendarService {
         orderBy: 'startTime'
       });
 
+      const events = response.data.items || [];
+
       return {
         success: true,
-        events: response.data.items || [],
-        count: response.data.items?.length || 0
+        events: events.map(event => ({
+          id: event.id,
+          title: event.summary || 'Untitled Event',
+          summary: event.summary || 'Untitled Event',
+          start: event.start?.dateTime || event.start?.date,
+          end: event.end?.dateTime || event.end?.date,
+          location: event.location || 'No location',
+          attendees: (event.attendees || []).map(attendee => ({
+            email: attendee.email,
+            displayName: attendee.displayName || attendee.email.split('@')[0],
+            responseStatus: attendee.responseStatus
+          }))
+        })),
+        count: events.length
       };
     } catch (error) {
       return {
