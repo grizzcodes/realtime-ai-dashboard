@@ -4,7 +4,6 @@ const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
 const cors = require('cors');
-const fetch = require('node-fetch');
 
 const app = express();
 const server = http.createServer(app);
@@ -23,11 +22,15 @@ const NotionService = require('./src/services/notionService');
 const IntegrationService = require('./src/services/integrationService');
 const SupabaseService = require('./src/services/supabaseService');
 const FirefliesService = require('./src/services/firefliesService');
+const OpenAIService = require('./src/services/openAIService');
+const ClaudeService = require('./src/services/claudeService');
 
 const notionService = new NotionService();
 const integrationService = new IntegrationService();
 const supabaseService = new SupabaseService();
 const firefliesService = new FirefliesService();
+const openAIService = new OpenAIService();
+const claudeService = new ClaudeService();
 
 console.log('🚀 Starting Realtime AI Dashboard Backend...');
 
@@ -90,6 +93,25 @@ async function checkIntegrationStatus() {
 }
 
 // API Routes
+app.get('/health', async (req, res) => {
+  try {
+    const apiConnections = await checkIntegrationStatus();
+    res.json({ 
+      status: 'healthy', 
+      timestamp: new Date().toISOString(),
+      user: 'dashboard-user',
+      apiConnections
+    });
+  } catch (error) {
+    console.error('❌ Health check failed:', error);
+    res.status(500).json({
+      status: 'error',
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
 app.get('/api/health', async (req, res) => {
   try {
     const apiConnections = await checkIntegrationStatus();
@@ -105,6 +127,74 @@ app.get('/api/health', async (req, res) => {
       status: 'error',
       error: error.message,
       timestamp: new Date().toISOString()
+    });
+  }
+});
+
+app.post('/api/ai-test', async (req, res) => {
+  try {
+    console.log('🤖 Testing AI integration...');
+    const { message } = req.body;
+    
+    let aiResponse = null;
+    let aiService = 'none';
+    
+    // Try OpenAI first
+    if (process.env.OPENAI_API_KEY) {
+      try {
+        const openAIResult = await openAIService.processMessage(message || 'Test message for task creation');
+        if (openAIResult.success) {
+          aiResponse = openAIResult;
+          aiService = 'openai';
+        }
+      } catch (error) {
+        console.log('⚠️ OpenAI failed, trying Claude:', error.message);
+      }
+    }
+    
+    // Try Claude if OpenAI failed or unavailable
+    if (!aiResponse && process.env.ANTHROPIC_API_KEY) {
+      try {
+        const claudeResult = await claudeService.processMessage(message || 'Test message for task creation');
+        if (claudeResult.success) {
+          aiResponse = claudeResult;
+          aiService = 'claude';
+        }
+      } catch (error) {
+        console.log('⚠️ Claude failed:', error.message);
+      }
+    }
+    
+    if (aiResponse) {
+      // Emit real-time update
+      io.emit('aiTestUpdate', {
+        type: 'ai_test_completed',
+        service: aiService,
+        result: aiResponse,
+        timestamp: new Date().toISOString()
+      });
+      
+      res.json({
+        success: true,
+        service: aiService,
+        result: aiResponse,
+        message: `AI test successful using ${aiService.toUpperCase()}`
+      });
+    } else {
+      res.status(400).json({
+        success: false,
+        error: 'No AI service available. Please configure OPENAI_API_KEY or ANTHROPIC_API_KEY',
+        availableServices: {
+          openai: !!process.env.OPENAI_API_KEY,
+          claude: !!process.env.ANTHROPIC_API_KEY
+        }
+      });
+    }
+  } catch (error) {
+    console.error('❌ AI test failed:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
     });
   }
 });
@@ -223,6 +313,69 @@ app.get('/api/fireflies/meetings', async (req, res) => {
   }
 });
 
+// Individual service test endpoints
+app.get('/api/test/notion', async (req, res) => {
+  try {
+    const result = await notionService.testConnection();
+    res.json(result);
+  } catch (error) {
+    res.json({ success: false, error: error.message });
+  }
+});
+
+app.get('/api/test/fireflies', async (req, res) => {
+  try {
+    const result = await firefliesService.testConnection();
+    res.json(result);
+  } catch (error) {
+    res.json({ success: false, error: error.message });
+  }
+});
+
+app.get('/api/test/gmail', async (req, res) => {
+  try {
+    const result = await integrationService.testGmailConnection();
+    res.json(result);
+  } catch (error) {
+    res.json({ success: false, error: error.message });
+  }
+});
+
+app.get('/api/test/calendar', async (req, res) => {
+  try {
+    const result = await integrationService.testCalendarConnection();
+    res.json(result);
+  } catch (error) {
+    res.json({ success: false, error: error.message });
+  }
+});
+
+app.get('/api/test/openai', async (req, res) => {
+  try {
+    if (!process.env.OPENAI_API_KEY) {
+      return res.json({ success: false, error: 'OPENAI_API_KEY not configured' });
+    }
+    
+    const result = await openAIService.processMessage('Test message');
+    res.json({ success: true, message: 'OpenAI connection successful', result });
+  } catch (error) {
+    res.json({ success: false, error: error.message });
+  }
+});
+
+app.get('/api/test/claude', async (req, res) => {
+  try {
+    if (!process.env.ANTHROPIC_API_KEY) {
+      return res.json({ success: false, error: 'ANTHROPIC_API_KEY not configured' });
+    }
+    
+    const result = await claudeService.processMessage('Test message');
+    res.json({ success: true, message: 'Claude connection successful', result });
+  } catch (error) {
+    res.json({ success: false, error: error.message });
+  }
+});
+
 // Webhooks for ngrok
 app.post('/webhook/fireflies', express.raw({ type: 'application/json' }), (req, res) => {
   try {
@@ -277,6 +430,7 @@ server.listen(PORT, () => {
   console.log(`📋 Tasks: http://localhost:${PORT}/api/tasks`);
   console.log(`🎙️ Fireflies: http://localhost:${PORT}/api/fireflies/meetings`);
   console.log(`🌐 Webhook health: http://localhost:${PORT}/webhook/health`);
+  console.log(`🤖 AI Test: http://localhost:${PORT}/api/ai-test`);
   console.log(`✅ Real data integration enabled`);
   
   console.log('\n🔧 Environment Status:');
