@@ -24,6 +24,28 @@ class ClaudeService {
     }
   }
 
+  async processMessage(message, conversationHistory = []) {
+    if (!this.client) {
+      return { success: false, error: 'Claude not configured' };
+    }
+
+    try {
+      const response = await this.client.messages.create({
+        model: 'claude-3-sonnet-20240229',
+        max_tokens: 1000,
+        messages: [{ role: 'user', content: message }]
+      });
+
+      return { 
+        success: true, 
+        content: response.content[0].text,
+        response: response.content[0].text 
+      };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  }
+
   async generateTasksFromText(text) {
     if (!this.client) {
       return { success: false, error: 'Claude not configured' };
