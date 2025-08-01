@@ -8,3 +8,8 @@
 .env.test
 .env.production
 env/
+# Add these lines to .gitignore
+**/node_modules/.cache/
+**/node_modules/.cache/**/*
+frontend/node_modules/.cache/
+backend/node_modules/.cache/
