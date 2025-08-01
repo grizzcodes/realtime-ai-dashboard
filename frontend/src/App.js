@@ -104,6 +104,31 @@ function App() {
     }
   };
 
+  const completeTask = async (taskId, currentlyCompleted) => {
+    try {
+      console.log(`📝 ${!currentlyCompleted ? 'Completing' : 'Uncompleting'} task: ${taskId}`);
+      
+      const response = await fetch(`http://localhost:3002/api/notion/task/${taskId}/complete`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ completed: !currentlyCompleted })
+      });
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        console.log('✅ Task updated in Notion');
+        loadTasks(); // Refresh tasks list
+      } else {
+        console.error('❌ Failed to update task:', result.error);
+        alert('Failed to update task: ' + result.error);
+      }
+    } catch (error) {
+      console.error('❌ Error updating task:', error);
+      alert('Error updating task: ' + error.message);
+    }
+  };
+
   const testAI = async () => {
     try {
       console.log('🤖 Testing AI integration...');
@@ -314,38 +339,60 @@ function App() {
               <div className="space-y-4">
                 {tasks.map((task, index) => (
                   <div key={task.id || index} className="bg-white/5 rounded-lg p-4 border border-white/10">
-                    <div className="flex justify-between items-start mb-2">
-                      <h3 className="text-white font-medium">{task.title || task.name}</h3>
-                      <span className={`px-2 py-1 rounded text-xs font-medium ${
-                        task.status === 'Completed' ? 'bg-green-500/20 text-green-400' :
-                        task.status === 'In progress' ? 'bg-yellow-500/20 text-yellow-400' :
-                        'bg-gray-500/20 text-gray-400'
-                      }`}>
-                        {task.status || 'Not started'}
-                      </span>
-                    </div>
-                    
-                    {task.summary && (
-                      <p className="text-gray-300 text-sm mb-2">{task.summary}</p>
-                    )}
-                    
-                    <div className="flex justify-between items-center text-xs text-gray-400">
-                      <span>Source: {task.source || 'Unknown'}</span>
-                      {task.urgency && (
-                        <span className="flex items-center">
-                          Priority: {task.urgency}/5
-                          <div className="ml-1 flex">
-                            {[...Array(5)].map((_, i) => (
-                              <div
-                                key={i}
-                                className={`w-1 h-3 mx-0.5 rounded ${
-                                  i < (task.urgency || 1) ? 'bg-red-500' : 'bg-gray-600'
-                                }`}
-                              />
-                            ))}
-                          </div>
-                        </span>
-                      )}
+                    <div className="flex items-start gap-3">
+                      {/* Checkbox for task completion */}
+                      <input 
+                        type="checkbox" 
+                        checked={task.status === 'completed' || task.rawStatus === 'Done'}
+                        onChange={() => completeTask(task.id, task.status === 'completed' || task.rawStatus === 'Done')}
+                        className="mt-1 w-4 h-4 text-green-600 bg-transparent border-gray-300 rounded focus:ring-green-500 focus:ring-2"
+                      />
+                      
+                      <div className="flex-1">
+                        <div className="flex justify-between items-start mb-2">
+                          <h3 className={`font-medium ${
+                            task.status === 'completed' || task.rawStatus === 'Done' 
+                              ? 'text-gray-400 line-through' 
+                              : 'text-white'
+                          }`}>
+                            {task.title || task.name}
+                          </h3>
+                          <span className={`px-2 py-1 rounded text-xs font-medium ${
+                            task.status === 'Completed' || task.rawStatus === 'Done' ? 'bg-green-500/20 text-green-400' :
+                            task.status === 'In progress' ? 'bg-yellow-500/20 text-yellow-400' :
+                            'bg-gray-500/20 text-gray-400'
+                          }`}>
+                            {task.rawStatus || task.status || 'Not started'}
+                          </span>
+                        </div>
+                        
+                        {task.summary && (
+                          <p className="text-gray-300 text-sm mb-2">{task.summary}</p>
+                        )}
+                        
+                        {task.assignee && task.assignee !== 'Unassigned' && (
+                          <p className="text-blue-300 text-sm mb-2">👤 {task.assignee}</p>
+                        )}
+                        
+                        <div className="flex justify-between items-center text-xs text-gray-400">
+                          <span>Source: {task.source || 'Unknown'}</span>
+                          {task.urgency && (
+                            <span className="flex items-center">
+                              Priority: {task.urgency}/5
+                              <div className="ml-1 flex">
+                                {[...Array(5)].map((_, i) => (
+                                  <div
+                                    key={i}
+                                    className={`w-1 h-3 mx-0.5 rounded ${
+                                      i < (task.urgency || 1) ? 'bg-red-500' : 'bg-gray-600'
+                                    }`}
+                                  />
+                                ))}
+                              </div>
+                            </span>
+                          )}
+                        </div>
+                      </div>
                     </div>
                   </div>
                 ))}
