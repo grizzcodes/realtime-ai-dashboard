@@ -10,7 +10,7 @@ const server = http.createServer(app);
 const io = socketIo(server, {
   cors: {
     origin: "http://localhost:3000",
-    methods: ["GET", "POST"]
+    methods: ["GET", "POST", "PATCH"]
   }
 });
 
@@ -299,6 +299,75 @@ app.get('/api/tasks', async (req, res) => {
   }
 });
 
+// Add task completion endpoint
+app.patch('/api/notion/task/:taskId/complete', async (req, res) => {
+  try {
+    const { taskId } = req.params;
+    const { completed } = req.body;
+    
+    console.log(`📝 ${completed ? 'Completing' : 'Uncompleting'} task: ${taskId}`);
+    
+    const result = await notionService.updateTaskStatus(taskId, completed ? 'completed' : 'pending');
+    
+    if (result.success) {
+      // Emit real-time update to all clients
+      io.emit('taskUpdate', {
+        type: 'task_status_updated',
+        taskId: taskId,
+        completed: completed,
+        timestamp: new Date().toISOString()
+      });
+      
+      res.json({
+        success: true,
+        message: `Task ${completed ? 'completed' : 'reopened'}`,
+        taskId: taskId
+      });
+    } else {
+      res.status(400).json({
+        success: false,
+        error: result.error
+      });
+    }
+  } catch (error) {
+    console.error('❌ Failed to update task:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Add Gmail latest emails endpoint
+app.get('/api/gmail/latest', async (req, res) => {
+  try {
+    console.log('📧 Fetching latest Gmail emails...');
+    
+    const result = await integrationService.getLatestEmails(5);
+    
+    if (result.success) {
+      res.json({
+        success: true,
+        emails: result.emails || [],
+        count: result.emails?.length || 0
+      });
+    } else {
+      res.status(400).json({
+        success: false,
+        error: result.error,
+        emails: []
+      });
+    }
+  } catch (error) {
+    console.error('❌ Failed to get latest emails:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      emails: []
+    });
+  }
+});
+
 app.get('/api/calendar/events', async (req, res) => {
   try {
     const maxResults = parseInt(req.query.maxResults) || 10;
@@ -496,6 +565,8 @@ server.listen(PORT, () => {
   console.log(`🌐 Webhook health: http://localhost:${PORT}/webhook/health`);
   console.log(`🤖 AI Test: http://localhost:${PORT}/api/ai-test`);
   console.log(`💬 AI Chat: http://localhost:${PORT}/api/ai-chat`);
+  console.log(`📝 Task Complete: http://localhost:${PORT}/api/notion/task/:id/complete`);
+  console.log(`📧 Latest Gmail: http://localhost:${PORT}/api/gmail/latest`);
   console.log(`✅ Real data integration enabled`);
   
   console.log('\n🔧 Environment Status:');
