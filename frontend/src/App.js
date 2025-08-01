@@ -8,6 +8,7 @@ function App() {
   const [tasks, setTasks] = useState([]);
   const [events, setEvents] = useState([]);
   const [meetings, setMeetings] = useState([]);
+  const [emails, setEmails] = useState([]);
   const [isConnected, setIsConnected] = useState(false);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [apiStatus, setApiStatus] = useState({});
@@ -48,6 +49,7 @@ function App() {
     loadTasks();
     loadApiStatus();
     loadMeetings();
+    loadEmails();
       
     return () => {
       if (socketConnection) {
@@ -101,6 +103,25 @@ function App() {
       }
     } catch (error) {
       console.error('❌ Failed to load meetings:', error);
+    }
+  };
+
+  const loadEmails = async () => {
+    try {
+      console.log('📧 Loading latest emails...');
+      const response = await fetch('http://localhost:3002/api/gmail/latest');
+      const data = await response.json();
+      
+      if (data.success) {
+        setEmails(data.emails || []);
+        console.log(`✅ Loaded ${data.emails?.length || 0} emails`);
+      } else {
+        console.log('⚠️ Gmail not configured:', data.error);
+        setEmails([]);
+      }
+    } catch (error) {
+      console.error('❌ Failed to load emails:', error);
+      setEmails([]);
     }
   };
 
@@ -257,7 +278,7 @@ function App() {
 
         {/* Tab Content */}
         {activeTab === 'dashboard' && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-4 gap-6">
             {/* Tasks Summary */}
             <div className="bg-black/20 backdrop-blur-lg rounded-xl p-6 border border-white/10">
               <h3 className="text-lg font-semibold text-white mb-4">📋 Tasks Overview</h3>
@@ -269,16 +290,51 @@ function App() {
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-300">Completed:</span>
                   <span className="text-green-400 font-medium">
-                    {tasks.filter(t => t.status === 'Completed').length}
+                    {tasks.filter(t => t.status === 'completed' || t.rawStatus === 'Done').length}
                   </span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-300">In Progress:</span>
                   <span className="text-yellow-400 font-medium">
-                    {tasks.filter(t => t.status === 'In progress').length}
+                    {tasks.filter(t => t.status === 'in_progress' || t.rawStatus === 'In progress').length}
                   </span>
                 </div>
               </div>
+            </div>
+
+            {/* Gmail Latest */}
+            <div className="bg-black/20 backdrop-blur-lg rounded-xl p-6 border border-white/10">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-lg font-semibold text-white">📧 Latest Gmail</h3>
+                <button
+                  onClick={loadEmails}
+                  className="text-gray-400 hover:text-white text-sm"
+                >
+                  🔄
+                </button>
+              </div>
+              {emails.length === 0 ? (
+                <p className="text-gray-400 text-sm">No emails or Gmail not configured</p>
+              ) : (
+                <div className="space-y-3">
+                  {emails.slice(0, 3).map((email, index) => (
+                    <div key={email.id || index} className="border-b border-white/10 pb-2 last:border-b-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <div className={`w-2 h-2 rounded-full ${email.isUnread ? 'bg-blue-400' : 'bg-gray-500'}`}></div>
+                        <p className="text-white text-sm font-medium truncate">
+                          {email.subject || 'No Subject'}
+                        </p>
+                      </div>
+                      <p className="text-gray-300 text-xs truncate">
+                        From: {email.from?.split('<')[0]?.trim() || 'Unknown'}
+                      </p>
+                      <p className="text-gray-400 text-xs truncate">
+                        {email.snippet}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Meetings Summary */}
