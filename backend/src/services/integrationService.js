@@ -173,7 +173,7 @@ class IntegrationService {
     return await this.calendarService.createEvent(eventData);
   }
 
-  async getLatestEmails(limit = 5) {
+  async getLatestEmails(limit = 10) {
     try {
       if (!process.env.GOOGLE_REFRESH_TOKEN) {
         return {
@@ -183,23 +183,20 @@ class IntegrationService {
         };
       }
 
-      // Refresh access token
       const { credentials } = await this.googleAuth.refreshAccessToken();
       this.googleAuth.setCredentials(credentials);
 
       const gmail = google.gmail({ version: 'v1', auth: this.googleAuth });
       
-      // Get inbox emails specifically
       const response = await gmail.users.messages.list({
         userId: 'me',
         maxResults: limit,
-        labelIds: ['INBOX'], // Only inbox emails
-        q: '-in:chats' // Exclude chat messages
+        labelIds: ['INBOX'],
+        q: '-in:chats'
       });
 
       const messages = response.data.messages || [];
       
-      // Get email details for each message
       const emailDetails = await Promise.all(
         messages.slice(0, limit).map(async (message) => {
           try {
@@ -256,6 +253,45 @@ class IntegrationService {
         success: false,
         error: error.message,
         emails: []
+      };
+    }
+  }
+
+  async archiveEmail(emailId) {
+    try {
+      if (!process.env.GOOGLE_REFRESH_TOKEN) {
+        return {
+          success: false,
+          error: 'Google Gmail not configured. Set up OAuth first.'
+        };
+      }
+
+      const { credentials } = await this.googleAuth.refreshAccessToken();
+      this.googleAuth.setCredentials(credentials);
+
+      const gmail = google.gmail({ version: 'v1', auth: this.googleAuth });
+      
+      await gmail.users.messages.modify({
+        userId: 'me',
+        id: emailId,
+        resource: {
+          removeLabelIds: ['INBOX']
+        }
+      });
+
+      console.log(`✅ Email ${emailId} archived successfully`);
+
+      return {
+        success: true,
+        message: 'Email archived successfully',
+        emailId: emailId
+      };
+      
+    } catch (error) {
+      console.error('❌ Failed to archive email:', error);
+      return {
+        success: false,
+        error: error.message
       };
     }
   }
