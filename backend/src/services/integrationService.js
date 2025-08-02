@@ -1,14 +1,18 @@
-// backend/src/services/integrationService.js
+// backend/src/services/integrationService.js - Enhanced with all required methods
 const { google } = require('googleapis');
 const fetch = require('node-fetch');
 const CalendarService = require('./calendarService');
+const NotionService = require('./notionService');
+const SupabaseService = require('./supabaseService');
+const OpenAIService = require('./openAIService');
+const ClaudeService = require('./claudeService');
 
 class IntegrationService {
   constructor() {
     this.googleAuth = new google.auth.OAuth2(
       process.env.GOOGLE_CLIENT_ID,
       process.env.GOOGLE_CLIENT_SECRET,
-      'http://localhost:3002/auth/google/callback'
+      'http://localhost:3001/auth/google/callback'
     );
     
     if (process.env.GOOGLE_REFRESH_TOKEN) {
@@ -17,9 +21,84 @@ class IntegrationService {
       });
     }
 
+    // Initialize services
     this.calendarService = new CalendarService();
+    this.notionService = new NotionService();
+    this.supabaseService = new SupabaseService();
+    this.openaiService = new OpenAIService();
+    this.claudeService = new ClaudeService();
+    
+    console.log('🔧 IntegrationService initialized with all services');
   }
 
+  // ===== CORE STATUS METHODS =====
+  async getAllStatus() {
+    try {
+      const [gmail, calendar, slack, fireflies, notion, supabase, openai, claude] = await Promise.all([
+        this.testGmailConnection(),
+        this.testCalendarConnection(),
+        this.testSlackConnection(),
+        this.testFirefliesConnection(),
+        this.testNotionConnection(),
+        this.testSupabaseConnection(),
+        this.testOpenAIConnection(),
+        this.testClaudeConnection()
+      ]);
+
+      const integrations = {
+        gmail,
+        calendar,
+        slack,
+        fireflies,
+        notion,
+        supabase,
+        openai,
+        claude
+      };
+
+      const connected = Object.values(integrations).filter(s => s.success).length;
+
+      return {
+        ...integrations,
+        summary: {
+          connected,
+          total: Object.keys(integrations).length,
+          percentage: Math.round((connected / Object.keys(integrations).length) * 100)
+        }
+      };
+    } catch (error) {
+      console.error('❌ Failed to get all status:', error);
+      return {
+        error: error.message,
+        summary: { connected: 0, total: 8, percentage: 0 }
+      };
+    }
+  }
+
+  async testIntegration(name) {
+    const methodMap = {
+      gmail: () => this.testGmailConnection(),
+      calendar: () => this.testCalendarConnection(),
+      slack: () => this.testSlackConnection(),
+      fireflies: () => this.testFirefliesConnection(),
+      notion: () => this.testNotionConnection(),
+      supabase: () => this.testSupabaseConnection(),
+      openai: () => this.testOpenAIConnection(),
+      claude: () => this.testClaudeConnection()
+    };
+
+    const method = methodMap[name.toLowerCase()];
+    if (!method) {
+      return {
+        success: false,
+        error: `Unknown integration: ${name}`
+      };
+    }
+
+    return await method();
+  }
+
+  // ===== CONNECTION TESTS =====
   async testGmailConnection() {
     try {
       if (!process.env.GOOGLE_REFRESH_TOKEN) {
@@ -30,7 +109,6 @@ class IntegrationService {
         };
       }
 
-      // Refresh access token using oauth2Client
       const { credentials } = await this.googleAuth.refreshAccessToken();
       this.googleAuth.setCredentials(credentials);
 
@@ -43,7 +121,6 @@ class IntegrationService {
         emailAddress: response.data.emailAddress
       };
     } catch (error) {
-      console.error('Gmail connection error:', error);
       return {
         success: false,
         error: `Gmail failed: ${error.message}`,
@@ -140,39 +217,211 @@ class IntegrationService {
     }
   }
 
-  async getAllIntegrationsStatus() {
-    const [gmail, calendar, slack, fireflies] = await Promise.all([
-      this.testGmailConnection(),
-      this.testCalendarConnection(),
-      this.testSlackConnection(),
-      this.testFirefliesConnection()
-    ]);
+  async testNotionConnection() {
+    return await this.notionService.testConnection();
+  }
 
-    return {
-      gmail,
-      calendar,
-      slack,
-      fireflies,
-      summary: {
-        connected: [gmail, calendar, slack, fireflies].filter(s => s.success).length,
-        total: 4
+  async testSupabaseConnection() {
+    return await this.supabaseService.testConnection();
+  }
+
+  async testOpenAIConnection() {
+    return await this.openaiService.testConnection();
+  }
+
+  async testClaudeConnection() {
+    return await this.claudeService.testConnection();
+  }
+
+  // ===== NOTION METHODS =====
+  async getNotionTasks() {
+    try {
+      const result = await this.notionService.getTasks();
+      return {
+        success: true,
+        tasks: result.tasks || [],
+        count: result.tasks?.length || 0
+      };
+    } catch (error) {
+      console.error('❌ Failed to get Notion tasks:', error);
+      return {
+        success: false,
+        error: error.message,
+        tasks: []
+      };
+    }
+  }
+
+  async getFilteredTasks(person, status) {
+    try {
+      const result = await this.notionService.getFilteredTasks(person, status);
+      return result;
+    } catch (error) {
+      console.error('❌ Failed to get filtered tasks:', error);
+      return {
+        success: false,
+        error: error.message,
+        tasks: []
+      };
+    }
+  }
+
+  // ===== AI METHODS =====
+  async getAITasks() {
+    try {
+      const result = await this.supabaseService.getTasks(20);
+      return {
+        success: true,
+        tasks: result.tasks || [],
+        count: result.tasks?.length || 0
+      };
+    } catch (error) {
+      console.error('❌ Failed to get AI tasks:', error);
+      return {
+        success: false,
+        error: error.message,
+        tasks: []
+      };
+    }
+  }
+
+  async chatWithAI(message, context = {}) {
+    try {
+      console.log('🤖 Processing AI chat request...');
+      
+      // Try OpenAI first, fallback to Claude
+      let result;
+      
+      if (process.env.OPENAI_API_KEY) {
+        result = await this.openaiService.chat(message, context);
+      } else if (process.env.ANTHROPIC_API_KEY) {
+        result = await this.claudeService.chat(message, context);
+      } else {
+        return {
+          success: false,
+          error: 'No AI service configured. Add OPENAI_API_KEY or ANTHROPIC_API_KEY to .env',
+          response: 'Sorry, I need an AI service to be configured.'
+        };
       }
-    };
+
+      if (result.success) {
+        // Save chat to Supabase if available
+        try {
+          await this.supabaseService.saveChatMessage({
+            message,
+            response: result.response,
+            context,
+            timestamp: new Date()
+          });
+        } catch (saveError) {
+          console.warn('⚠️ Could not save chat to Supabase:', saveError.message);
+        }
+      }
+
+      return result;
+    } catch (error) {
+      console.error('❌ AI chat failed:', error);
+      return {
+        success: false,
+        error: error.message,
+        response: 'Sorry, I encountered an error processing your request.'
+      };
+    }
   }
 
-  // Calendar integration methods
-  async getUpcomingEvents(maxResults = 10) {
-    return await this.calendarService.getUpcomingEvents(maxResults);
+  async testAI() {
+    try {
+      console.log('🧠 Testing AI with sample task creation...');
+      
+      const testMessage = "Create a high priority task: Fix the payment gateway bug by tomorrow";
+      const context = {
+        source: 'ai_test',
+        timestamp: new Date().toISOString()
+      };
+
+      // Try to create a test task
+      let result;
+      
+      if (process.env.OPENAI_API_KEY) {
+        result = await this.openaiService.generateTask(testMessage, context);
+      } else if (process.env.ANTHROPIC_API_KEY) {
+        result = await this.claudeService.generateTask(testMessage, context);
+      } else {
+        return {
+          success: false,
+          error: 'No AI service configured',
+          message: 'Add OPENAI_API_KEY or ANTHROPIC_API_KEY to .env'
+        };
+      }
+
+      if (result.success && result.task) {
+        // Save to Supabase if available
+        try {
+          await this.supabaseService.saveTask(result.task);
+          console.log('✅ Test task saved to Supabase');
+        } catch (saveError) {
+          console.warn('⚠️ Could not save test task to Supabase:', saveError.message);
+        }
+      }
+
+      return {
+        success: true,
+        message: 'AI test completed successfully',
+        task: result.task || null,
+        aiService: process.env.OPENAI_API_KEY ? 'OpenAI' : 'Claude'
+      };
+    } catch (error) {
+      console.error('❌ AI test failed:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
   }
 
-  async getTodaysEvents() {
-    return await this.calendarService.getTodaysEvents();
+  // ===== TASK MANAGEMENT =====
+  async completeTask(taskId) {
+    try {
+      console.log(`✅ Completing task: ${taskId}`);
+      
+      // Try Supabase first
+      let result = await this.supabaseService.updateTaskStatus(taskId, 'completed');
+      
+      if (!result.success) {
+        // Fallback to Notion if it's a Notion task
+        result = await this.notionService.updateTaskStatus(taskId, 'completed');
+      }
+
+      return result;
+    } catch (error) {
+      console.error('❌ Failed to complete task:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
   }
 
-  async createCalendarEvent(eventData) {
-    return await this.calendarService.createEvent(eventData);
+  // ===== CALENDAR METHODS =====
+  async getNextMeetings(limit = 5) {
+    try {
+      const result = await this.calendarService.getUpcomingEvents(limit);
+      return {
+        success: true,
+        meetings: result.events || [],
+        count: result.events?.length || 0
+      };
+    } catch (error) {
+      console.error('❌ Failed to get next meetings:', error);
+      return {
+        success: false,
+        error: error.message,
+        meetings: []
+      };
+    }
   }
 
+  // ===== EMAIL METHODS =====
   async getLatestEmails(limit = 10) {
     try {
       if (!process.env.GOOGLE_REFRESH_TOKEN) {
@@ -213,7 +462,7 @@ class IntegrationService {
             
             const fromHeader = getHeader('From');
             const senderName = fromHeader.includes('<') ? 
-              fromHeader.split('<')[0].trim().replace(/"/g, '') : 
+              fromHeader.split('<')[0].trim().replace(/\"/g, '') : 
               fromHeader;
             
             return {
@@ -294,6 +543,23 @@ class IntegrationService {
         error: error.message
       };
     }
+  }
+
+  // ===== LEGACY COMPATIBILITY =====
+  async getAllIntegrationsStatus() {
+    return await this.getAllStatus();
+  }
+
+  async getUpcomingEvents(maxResults = 10) {
+    return await this.calendarService.getUpcomingEvents(maxResults);
+  }
+
+  async getTodaysEvents() {
+    return await this.calendarService.getTodaysEvents();
+  }
+
+  async createCalendarEvent(eventData) {
+    return await this.calendarService.createEvent(eventData);
   }
 }
 
