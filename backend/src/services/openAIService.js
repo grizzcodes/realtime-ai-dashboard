@@ -1,4 +1,6 @@
 // backend/src/services/openAIService.js
+const fetch = require('node-fetch');
+
 class OpenAIService {
   constructor() {
     this.apiKey = process.env.OPENAI_API_KEY;
