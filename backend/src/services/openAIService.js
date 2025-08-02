@@ -1,83 +1,166 @@
-const OpenAI = require('openai');
-
+// backend/src/services/openAIService.js
 class OpenAIService {
   constructor() {
-    this.client = process.env.OPENAI_API_KEY ? new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY,
-    }) : null;
+    this.apiKey = process.env.OPENAI_API_KEY;
+    this.baseUrl = 'https://api.openai.com/v1';
   }
 
   async testConnection() {
-    if (!this.client) {
-      return { success: false, error: 'OpenAI API key not configured' };
-    }
-
     try {
-      const response = await this.client.models.list();
-      return { success: true, message: 'OpenAI connection successful' };
-    } catch (error) {
-      return { success: false, error: error.message };
-    }
-  }
+      if (!this.apiKey) {
+        return {
+          success: false,
+          error: 'Add OPENAI_API_KEY to .env',
+          needsAuth: true
+        };
+      }
 
-  async processMessage(message, conversationHistory = []) {
-    if (!this.client) {
-      return { success: false, error: 'OpenAI not configured' };
-    }
-
-    try {
-      const completion = await this.client.chat.completions.create({
-        model: 'gpt-4',
-        messages: [{ role: 'user', content: message }],
-        max_tokens: 1000,
+      const response = await fetch(`${this.baseUrl}/models`, {
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json'
+        }
       });
 
-      return { 
-        success: true, 
-        content: completion.choices[0].message.content,
-        response: completion.choices[0].message.content 
+      if (!response.ok) {
+        const error = await response.json();
+        return {
+          success: false,
+          error: `OpenAI error: ${error.error?.message || response.statusText}`
+        };
+      }
+
+      return {
+        success: true,
+        message: 'OpenAI connection successful'
       };
     } catch (error) {
-      return { success: false, error: error.message };
+      return {
+        success: false,
+        error: `OpenAI failed: ${error.message}`
+      };
     }
   }
 
-  async generateTasksFromText(text) {
-    if (!this.client) {
-      return { success: false, error: 'OpenAI not configured' };
-    }
-
+  async chat(message, context = {}) {
     try {
-      const completion = await this.client.chat.completions.create({
-        model: 'gpt-4',
-        messages: [
-          {
-            role: 'system',
-            content: 'Extract tasks from the given text and return as JSON array with title, description, urgency (1-5), and assignee fields.'
-          },
-          {
-            role: 'user',
-            content: text
-          }
-        ],
-        max_tokens: 500,
+      if (!this.apiKey) {
+        return {
+          success: false,
+          error: 'OpenAI API key not configured'
+        };
+      }
+
+      const systemPrompt = this.buildSystemPrompt(context);
+      
+      const response = await fetch(`${this.baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: 'gpt-4',
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: message }
+          ],
+          max_tokens: 500,
+          temperature: 0.7
+        })
       });
 
-      const tasks = [{
-        id: `openai-${Date.now()}`,
-        title: 'AI Generated Task',
-        description: text,
-        urgency: 3,
-        assignee: 'AI Assistant',
-        status: 'pending',
-        created: new Date(),
-        source: 'openai'
-      }];
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error?.message || 'OpenAI API error');
+      }
 
-      return { success: true, tasks };
+      const data = await response.json();
+      
+      return {
+        success: true,
+        response: data.choices[0].message.content
+      };
     } catch (error) {
-      return { success: false, error: error.message };
+      console.error('OpenAI chat error:', error);
+      return {
+        success: false,
+        error: error.message,
+        response: 'Sorry, I encountered an error.'
+      };
     }
+  }
+
+  async generateTask(message, context = {}) {
+    try {
+      const prompt = `Analyze this message and create a structured task: "${message}"
+
+Return JSON in this format:
+{
+  "title": "Task title",
+  "urgency": 1-5,
+  "category": "task|meeting|email|notification",
+  "summary": "Brief description",
+  "deadline": "ISO date or null",
+  "tags": ["tag1", "tag2"]
+}`;
+
+      const response = await fetch(`${this.baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: 'gpt-4',
+          messages: [
+            { role: 'system', content: 'You are a task management AI. Always respond with valid JSON only.' },
+            { role: 'user', content: prompt }
+          ],
+          max_tokens: 300,
+          temperature: 0.3
+        })
+      });
+
+      const data = await response.json();
+      const taskData = JSON.parse(data.choices[0].message.content);
+      
+      const task = {
+        id: `task-${Date.now()}`,
+        ...taskData,
+        source: context.source || 'openai',
+        created: new Date(),
+        status: 'pending',
+        aiGenerated: true
+      };
+
+      return {
+        success: true,
+        task
+      };
+    } catch (error) {
+      console.error('OpenAI task generation error:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
+  buildSystemPrompt(context) {
+    let prompt = `You are an AI assistant helping with productivity and task management. You have access to the user's current context:`;
+    
+    if (context.tasks?.length > 0) {
+      prompt += `\n\nCurrent tasks: ${context.tasks.map(t => `- ${t.title} (${t.status})`).join('\n')}`;
+    }
+    
+    if (context.emails?.length > 0) {
+      prompt += `\n\nRecent emails: ${context.emails.map(e => `- ${e.subject} from ${e.from}`).join('\n')}`;
+    }
+    
+    prompt += `\n\nBe helpful, concise, and actionable. If asked about productivity or tasks, consider the current context.`;
+    
+    return prompt;
   }
 }
 
