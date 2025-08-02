@@ -1,4 +1,4 @@
-/* Custom styles for the AI Dashboard */
+/* Enhanced styles for the AI Dashboard with Dark Mode Support */
 
 @import 'tailwindcss/base';
 @import 'tailwindcss/components';
@@ -12,7 +12,17 @@ body {
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background-color: #f9fafb;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* Dark mode support */
+html.dark {
+  color-scheme: dark;
+}
+
+html.dark body {
+  background-color: #111827;
+  color: #f9fafb;
 }
 
 code {
@@ -20,7 +30,7 @@ code {
     monospace;
 }
 
-/* Custom scrollbar */
+/* Custom scrollbar for both themes */
 ::-webkit-scrollbar {
   width: 6px;
 }
@@ -30,16 +40,35 @@ code {
   border-radius: 3px;
 }
 
+html.dark ::-webkit-scrollbar-track {
+  background: #374151;
+}
+
 ::-webkit-scrollbar-thumb {
   background: #c1c1c1;
   border-radius: 3px;
+}
+
+html.dark ::-webkit-scrollbar-thumb {
+  background: #6b7280;
 }
 
 ::-webkit-scrollbar-thumb:hover {
   background: #a8a8a8;
 }
 
-/* Line clamp utility */
+html.dark ::-webkit-scrollbar-thumb:hover {
+  background: #9ca3af;
+}
+
+/* Line clamp utilities */
+.line-clamp-1 {
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
 .line-clamp-2 {
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -64,8 +93,36 @@ code {
   }
 }
 
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 .animate-pulse-subtle {
   animation: pulse-subtle 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.animate-slide-in {
+  animation: slideIn 0.3s ease-out;
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.5s ease-in-out;
 }
 
 /* Task card hover effects */
@@ -78,8 +135,255 @@ code {
   box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
 }
 
+html.dark .task-card:hover {
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3), 0 10px 10px -5px rgba(0, 0, 0, 0.2);
+}
+
+/* Chat bubble animations */
+.chat-bubble {
+  animation: slideIn 0.3s ease-out;
+}
+
+/* Floating integration panel */
+.integration-panel {
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+html.dark .integration-panel {
+  background: rgba(31, 41, 55, 0.9);
+}
+
+.integration-panel:not(.dark) {
+  background: rgba(255, 255, 255, 0.9);
+}
+
+/* Custom button styles */
+.btn-primary {
+  @apply bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg transition-colors;
+}
+
+.btn-secondary {
+  @apply bg-gray-200 hover:bg-gray-300 text-gray-900 px-4 py-2 rounded-lg transition-colors;
+}
+
+html.dark .btn-secondary {
+  @apply bg-gray-700 hover:bg-gray-600 text-gray-100;
+}
+
+/* Status indicators */
+.status-connected {
+  @apply bg-green-500;
+  box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.2);
+}
+
+.status-disconnected {
+  @apply bg-red-500;
+  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.2);
+}
+
+/* Priority badges */
+.priority-high {
+  @apply bg-red-100 text-red-800 border border-red-200;
+}
+
+.priority-medium {
+  @apply bg-yellow-100 text-yellow-800 border border-yellow-200;
+}
+
+.priority-low {
+  @apply bg-green-100 text-green-800 border border-green-200;
+}
+
+html.dark .priority-high {
+  @apply bg-red-900 text-red-200 border-red-800;
+}
+
+html.dark .priority-medium {
+  @apply bg-yellow-900 text-yellow-200 border-yellow-800;
+}
+
+html.dark .priority-low {
+  @apply bg-green-900 text-green-200 border-green-800;
+}
+
 /* Focus states for accessibility */
 .focus-ring:focus {
   outline: 2px solid #3b82f6;
   outline-offset: 2px;
+}
+
+html.dark .focus-ring:focus {
+  outline-color: #60a5fa;
+}
+
+/* Loading states */
+.loading-spinner {
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  border: 3px solid rgba(255, 255, 255, 0.3);
+  border-radius: 50%;
+  border-top-color: #fff;
+  animation: spin 1s ease-in-out infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Chat message styling */
+.chat-message-user {
+  @apply bg-blue-500 text-white rounded-lg px-3 py-2 max-w-xs;
+  border-radius: 18px 18px 4px 18px;
+}
+
+.chat-message-ai {
+  @apply bg-gray-100 text-gray-900 rounded-lg px-3 py-2 max-w-xs;
+  border-radius: 18px 18px 18px 4px;
+}
+
+html.dark .chat-message-ai {
+  @apply bg-gray-700 text-gray-100;
+}
+
+/* Floating elements */
+.floating-element {
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+}
+
+html.dark .floating-element {
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.3), 0 10px 10px -5px rgba(0, 0, 0, 0.2);
+}
+
+/* Smooth transitions for theme switching */
+* {
+  transition: background-color 0.3s ease, border-color 0.3s ease, color 0.3s ease;
+}
+
+/* Email cards */
+.email-card {
+  transition: all 0.2s ease-in-out;
+}
+
+.email-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+html.dark .email-card:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+/* Integration status grid */
+.integration-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.integration-card {
+  @apply rounded-lg p-4 border transition-all duration-200;
+}
+
+.integration-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1);
+}
+
+html.dark .integration-card:hover {
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.3);
+}
+
+/* Responsive breakpoints */
+@media (max-width: 768px) {
+  .integration-panel {
+    width: 90vw;
+    right: 5vw;
+  }
+  
+  .chat-container {
+    width: 90vw;
+    left: 5vw;
+    transform: none;
+  }
+}
+
+@media (max-width: 1024px) {
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (min-width: 1024px) {
+  .dashboard-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+/* Custom utility classes */
+.text-shadow {
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+html.dark .text-shadow {
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.backdrop-blur {
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+/* Theme toggle button */
+.theme-toggle {
+  position: relative;
+  width: 60px;
+  height: 30px;
+  border-radius: 15px;
+  transition: all 0.3s ease;
+}
+
+.theme-toggle.dark {
+  background: linear-gradient(45deg, #1f2937, #374151);
+}
+
+.theme-toggle:not(.dark) {
+  background: linear-gradient(45deg, #fbbf24, #f59e0b);
+}
+
+.theme-toggle-slider {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  transition: transform 0.3s ease;
+  background: white;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.theme-toggle.dark .theme-toggle-slider {
+  transform: translateX(30px);
+  background: #1f2937;
+}
+
+/* Notification styles */
+.notification {
+  @apply fixed top-4 right-4 p-4 rounded-lg shadow-lg z-50;
+  animation: slideIn 0.3s ease-out;
+}
+
+.notification.success {
+  @apply bg-green-500 text-white;
+}
+
+.notification.error {
+  @apply bg-red-500 text-white;
+}
+
+.notification.info {
+  @apply bg-blue-500 text-white;
 }
