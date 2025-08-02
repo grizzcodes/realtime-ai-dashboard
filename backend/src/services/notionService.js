@@ -12,14 +12,72 @@ class NotionService {
 
   async testConnection() {
     if (!this.notion) {
-      return { success: false, error: 'Notion API key not configured' };
+      return { 
+        success: false, 
+        error: 'Notion not configured. Add NOTION_API_KEY to .env',
+        needsAuth: true
+      };
     }
 
     try {
       const response = await this.notion.users.me();
-      return { success: true, user: response };
+      return { 
+        success: true, 
+        message: `Connected: ${response.name}`,
+        user: response 
+      };
     } catch (error) {
-      return { success: false, error: error.message };
+      return { 
+        success: false, 
+        error: `Notion failed: ${error.message}`
+      };
+    }
+  }
+
+  async getFilteredTasks(person, status) {
+    try {
+      const result = await this.getTasks();
+      
+      if (!result.success) {
+        return result;
+      }
+
+      let filteredTasks = result.tasks;
+
+      // Filter by person if specified
+      if (person && person !== 'all') {
+        filteredTasks = filteredTasks.filter(task => 
+          task.keyPeople.some(p => p.toLowerCase().includes(person.toLowerCase()))
+        );
+      }
+
+      // Filter by status if specified
+      if (status && status !== 'all') {
+        filteredTasks = filteredTasks.filter(task => task.status === status);
+      }
+
+      // Extract unique people and status options
+      const people = [...new Set(result.tasks.flatMap(task => task.keyPeople))];
+      const statusOptionsFromTasks = [...new Set(result.tasks.map(task => task.status))];
+
+      return {
+        success: true,
+        tasks: filteredTasks,
+        people: people.sort(),
+        statusOptions: statusOptionsFromTasks.sort(),
+        filters: { person, status },
+        summary: {
+          total: filteredTasks.length,
+          filtered: person || status ? true : false
+        }
+      };
+    } catch (error) {
+      console.error('❌ Failed to get filtered tasks:', error);
+      return {
+        success: false,
+        error: error.message,
+        tasks: []
+      };
     }
   }
 
@@ -280,6 +338,7 @@ class NotionService {
       id: `notion-${page.id}`,
       notionId: page.id,
       title: taskName,
+      name: taskName, // Alias for frontend compatibility
       status: this.mapNotionStatusToOurs(statusObject.name),
       rawStatus: statusObject.name,
       statusColor: statusObject.color,
@@ -287,6 +346,7 @@ class NotionService {
       assignedUsers: assignedUsers,
       keyPeople: allAssignees,
       project: Array.isArray(brandProject) ? brandProject.join(', ') : (brandProject || 'General'),
+      priority: priority,
       urgency: this.mapNotionPriorityToUrgency(priority),
       deadline: dueDate ? new Date(dueDate) : null,
       type: type || 'Task',
@@ -356,7 +416,7 @@ class NotionService {
       }
       
       // Remove any extra quotes or formatting
-      cleanPageId = cleanPageId.replace(/['"]/g, '');
+      cleanPageId = cleanPageId.replace(/['\"]/g, '');
       
       console.log(`📝 Updating Notion task ${cleanPageId} to status: ${status}`);
       
