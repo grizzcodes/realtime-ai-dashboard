@@ -200,10 +200,13 @@ const App = () => {
 
   return (
     <div className="min-h-screen">
-      {/* Header with glass effect */}
+      {/* Header with DGenz logo */}
       <div className="header-glass p-4 sticky top-0 z-40">
         <div className="flex justify-between items-center">
-          <h1 className="text-3xl font-bold text-glow">🤖 Ultimate AI Organizer</h1>
+          <div className="flex items-center gap-3">
+            <div className="dgenz-logo">🍞</div>
+            <h1 className="text-3xl font-bold text-glow">DGenz Hub</h1>
+          </div>
           <div className="flex gap-4 items-center">
             {/* Dark Mode Toggle */}
             <button
