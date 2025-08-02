@@ -1,4 +1,6 @@
 // backend/src/services/claudeService.js
+const fetch = require('node-fetch');
+
 class ClaudeService {
   constructor() {
     this.apiKey = process.env.ANTHROPIC_API_KEY;
