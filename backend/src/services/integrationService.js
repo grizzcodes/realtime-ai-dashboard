@@ -1,6 +1,6 @@
 // backend/src/services/integrationService.js - Enhanced with all required methods
 const { google } = require('googleapis');
-const fetch = require('node-fetch');
+const fetch = require('node-fetch'); // Add this import
 const CalendarService = require('./calendarService');
 const NotionService = require('./notionService');
 const SupabaseService = require('./supabaseService');
@@ -233,7 +233,7 @@ class IntegrationService {
     return await this.claudeService.testConnection();
   }
 
-  // ===== NOTION METHODS =====
+  // ===== SIMPLIFIED METHODS FOR FRONTEND =====
   async getNotionTasks() {
     try {
       const result = await this.notionService.getTasks();
@@ -243,7 +243,6 @@ class IntegrationService {
         count: result.tasks?.length || 0
       };
     } catch (error) {
-      console.error('❌ Failed to get Notion tasks:', error);
       return {
         success: false,
         error: error.message,
@@ -257,7 +256,6 @@ class IntegrationService {
       const result = await this.notionService.getFilteredTasks(person, status);
       return result;
     } catch (error) {
-      console.error('❌ Failed to get filtered tasks:', error);
       return {
         success: false,
         error: error.message,
@@ -266,7 +264,6 @@ class IntegrationService {
     }
   }
 
-  // ===== AI METHODS =====
   async getAITasks() {
     try {
       const result = await this.supabaseService.getTasks(20);
@@ -276,7 +273,6 @@ class IntegrationService {
         count: result.tasks?.length || 0
       };
     } catch (error) {
-      console.error('❌ Failed to get AI tasks:', error);
       return {
         success: false,
         error: error.message,
@@ -287,9 +283,6 @@ class IntegrationService {
 
   async chatWithAI(message, context = {}) {
     try {
-      console.log('🤖 Processing AI chat request...');
-      
-      // Try OpenAI first, fallback to Claude
       let result;
       
       if (process.env.OPENAI_API_KEY) {
@@ -299,79 +292,45 @@ class IntegrationService {
       } else {
         return {
           success: false,
-          error: 'No AI service configured. Add OPENAI_API_KEY or ANTHROPIC_API_KEY to .env',
-          response: 'Sorry, I need an AI service to be configured.'
+          response: 'No AI service configured. Add API keys to .env'
         };
-      }
-
-      if (result.success) {
-        // Save chat to Supabase if available
-        try {
-          await this.supabaseService.saveChatMessage({
-            message,
-            response: result.response,
-            context,
-            timestamp: new Date()
-          });
-        } catch (saveError) {
-          console.warn('⚠️ Could not save chat to Supabase:', saveError.message);
-        }
       }
 
       return result;
     } catch (error) {
-      console.error('❌ AI chat failed:', error);
       return {
         success: false,
-        error: error.message,
-        response: 'Sorry, I encountered an error processing your request.'
+        response: 'Sorry, I encountered an error.'
       };
     }
   }
 
   async testAI() {
     try {
-      console.log('🧠 Testing AI with sample task creation...');
-      
       const testMessage = "Create a high priority task: Fix the payment gateway bug by tomorrow";
-      const context = {
-        source: 'ai_test',
-        timestamp: new Date().toISOString()
-      };
-
-      // Try to create a test task
-      let result;
       
+      let result;
       if (process.env.OPENAI_API_KEY) {
-        result = await this.openaiService.generateTask(testMessage, context);
+        result = await this.openaiService.generateTask(testMessage, { source: 'ai_test' });
       } else if (process.env.ANTHROPIC_API_KEY) {
-        result = await this.claudeService.generateTask(testMessage, context);
+        result = await this.claudeService.generateTask(testMessage, { source: 'ai_test' });
       } else {
         return {
           success: false,
-          error: 'No AI service configured',
-          message: 'Add OPENAI_API_KEY or ANTHROPIC_API_KEY to .env'
+          error: 'No AI service configured'
         };
       }
 
       if (result.success && result.task) {
-        // Save to Supabase if available
-        try {
-          await this.supabaseService.saveTask(result.task);
-          console.log('✅ Test task saved to Supabase');
-        } catch (saveError) {
-          console.warn('⚠️ Could not save test task to Supabase:', saveError.message);
-        }
+        await this.supabaseService.saveTask(result.task);
       }
 
       return {
         success: true,
         message: 'AI test completed successfully',
-        task: result.task || null,
-        aiService: process.env.OPENAI_API_KEY ? 'OpenAI' : 'Claude'
+        task: result.task || null
       };
     } catch (error) {
-      console.error('❌ AI test failed:', error);
       return {
         success: false,
         error: error.message
@@ -379,22 +338,16 @@ class IntegrationService {
     }
   }
 
-  // ===== TASK MANAGEMENT =====
   async completeTask(taskId) {
     try {
-      console.log(`✅ Completing task: ${taskId}`);
-      
-      // Try Supabase first
       let result = await this.supabaseService.updateTaskStatus(taskId, 'completed');
       
       if (!result.success) {
-        // Fallback to Notion if it's a Notion task
         result = await this.notionService.updateTaskStatus(taskId, 'completed');
       }
 
       return result;
     } catch (error) {
-      console.error('❌ Failed to complete task:', error);
       return {
         success: false,
         error: error.message
@@ -402,7 +355,6 @@ class IntegrationService {
     }
   }
 
-  // ===== CALENDAR METHODS =====
   async getNextMeetings(limit = 5) {
     try {
       const result = await this.calendarService.getUpcomingEvents(limit);
@@ -412,7 +364,6 @@ class IntegrationService {
         count: result.events?.length || 0
       };
     } catch (error) {
-      console.error('❌ Failed to get next meetings:', error);
       return {
         success: false,
         error: error.message,
@@ -421,7 +372,6 @@ class IntegrationService {
     }
   }
 
-  // ===== EMAIL METHODS =====
   async getLatestEmails(limit = 10) {
     try {
       if (!process.env.GOOGLE_REFRESH_TOKEN) {
@@ -475,7 +425,6 @@ class IntegrationService {
               threadId: details.data.threadId
             };
           } catch (error) {
-            console.log(`⚠️ Failed to get details for email ${message.id}:`, error.message);
             return {
               id: message.id,
               subject: 'Failed to load',
@@ -488,8 +437,6 @@ class IntegrationService {
         })
       );
 
-      console.log(`✅ Loaded ${emailDetails.length} inbox emails`);
-
       return {
         success: true,
         emails: emailDetails,
@@ -497,7 +444,6 @@ class IntegrationService {
       };
       
     } catch (error) {
-      console.error('❌ Failed to get latest emails:', error);
       return {
         success: false,
         error: error.message,
@@ -528,8 +474,6 @@ class IntegrationService {
         }
       });
 
-      console.log(`✅ Email ${emailId} archived successfully`);
-
       return {
         success: true,
         message: 'Email archived successfully',
@@ -537,29 +481,11 @@ class IntegrationService {
       };
       
     } catch (error) {
-      console.error('❌ Failed to archive email:', error);
       return {
         success: false,
         error: error.message
       };
     }
-  }
-
-  // ===== LEGACY COMPATIBILITY =====
-  async getAllIntegrationsStatus() {
-    return await this.getAllStatus();
-  }
-
-  async getUpcomingEvents(maxResults = 10) {
-    return await this.calendarService.getUpcomingEvents(maxResults);
-  }
-
-  async getTodaysEvents() {
-    return await this.calendarService.getTodaysEvents();
-  }
-
-  async createCalendarEvent(eventData) {
-    return await this.calendarService.createEvent(eventData);
   }
 }
 
