@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import io from 'socket.io-client';
-import { Send, MessageCircle } from 'lucide-react';
+import { Send, MessageCircle, Users, Clock } from 'lucide-react';
 import './App.css';
 
 const App = () => {
   const [tasks, setTasks] = useState([]);
   const [notionTasks, setNotionTasks] = useState([]);
   const [emails, setEmails] = useState([]);
-  const [events, setEvents] = useState([]);
+  const [meetings, setMeetings] = useState([]);
   const [isConnected, setIsConnected] = useState(false);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [apiStatus, setApiStatus] = useState({});
@@ -23,20 +23,18 @@ const App = () => {
     socket.on('connect', () => setIsConnected(true));
     socket.on('disconnect', () => setIsConnected(false));
     
-    // Load initial data
     loadTasks();
     loadNotionTasks();
     loadEmails();
+    loadMeetings();
     loadApiStatus();
     
-    // Check for saved dark mode preference
     const savedDarkMode = localStorage.getItem('darkMode') === 'true';
     setDarkMode(savedDarkMode);
     
     return () => socket.close();
   }, []);
 
-  // Apply dark mode to document
   useEffect(() => {
     if (darkMode) {
       document.documentElement.classList.add('dark');
@@ -76,6 +74,16 @@ const App = () => {
     }
   };
 
+  const loadMeetings = async () => {
+    try {
+      const response = await fetch('http://localhost:3001/api/fireflies/meetings');
+      const data = await response.json();
+      setMeetings(data.meetings || []);
+    } catch (error) {
+      console.error('Failed to load meetings:', error);
+    }
+  };
+
   const loadApiStatus = async () => {
     try {
       const response = await fetch('http://localhost:3001/api/integrations/status');
@@ -108,7 +116,8 @@ const App = () => {
           message: userMessage.content,
           context: {
             tasks: notionTasks.slice(0, 5),
-            emails: emails.slice(0, 3)
+            emails: emails.slice(0, 3),
+            meetings: meetings.slice(0, 3)
           }
         })
       });
@@ -208,7 +217,6 @@ const App = () => {
             <h1 className="text-3xl font-bold text-glow">DGenz Hub</h1>
           </div>
           <div className="flex gap-4 items-center">
-            {/* Dark Mode Toggle */}
             <button
               onClick={() => setDarkMode(!darkMode)}
               className="btn-glass p-2 rounded-lg"
@@ -216,13 +224,11 @@ const App = () => {
               {darkMode ? '☀️' : '🌙'}
             </button>
             
-            {/* Connection Status */}
             <span className={`glass px-3 py-1 rounded-full ${isConnected ? 'text-green-400' : 'text-red-400'}`}>
               <div className={`inline-block w-2 h-2 rounded-full mr-2 ${isConnected ? 'status-connected' : 'status-disconnected'}`}></div>
               {isConnected ? 'Connected' : 'Disconnected'}
             </span>
             
-            {/* Integration Status Button */}
             <button
               onClick={() => setShowIntegrations(!showIntegrations)}
               className="btn-glass px-3 py-2 rounded-lg flex items-center gap-2"
@@ -239,7 +245,7 @@ const App = () => {
         </div>
         
         <div className="flex gap-2 mt-4">
-          {['dashboard', 'integrations'].map(tab => (
+          {['dashboard', 'ai-tasks', 'integrations'].map(tab => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -249,7 +255,7 @@ const App = () => {
                   : 'btn-glass'
               }`}
             >
-              {tab.charAt(0).toUpperCase() + tab.slice(1)}
+              {tab === 'ai-tasks' ? 'AI Tasks' : tab.charAt(0).toUpperCase() + tab.slice(1)}
             </button>
           ))}
         </div>
@@ -343,37 +349,63 @@ const App = () => {
               )}
             </div>
 
-            {/* Middle Column - AI Tasks */}
+            {/* Middle Column - Fireflies Meetings */}
             <div className="card-glass p-6 animate-fade-in">
-              <h2 className="text-xl font-bold mb-4 text-glow">🤖 AI Tasks ({tasks.length})</h2>
-              {tasks.length === 0 ? (
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-xl font-bold text-glow">🎙️ Meetings ({meetings.length})</h2>
+                <button
+                  onClick={loadMeetings}
+                  className="btn-glass text-sm px-3 py-1 rounded"
+                >
+                  🔄
+                </button>
+              </div>
+              {meetings.length === 0 ? (
                 <p className="opacity-70">
-                  No AI tasks yet. Click Test AI to generate some!
+                  No meetings found. Check your Fireflies integration.
                 </p>
               ) : (
                 <div className="space-y-3 max-h-96 overflow-y-auto">
-                  {tasks.map(task => (
-                    <div key={task.id} className="task-card">
-                      <div className="flex justify-between items-start">
-                        <div className="flex-1">
-                          <h4 className="font-medium">{task.title}</h4>
-                          <span className="text-xs opacity-70">
-                            {task.source}
-                          </span>
-                          {task.urgency && (
-                            <span className={`ml-2 px-2 py-1 text-xs rounded priority-${
-                              task.urgency >= 4 ? 'high' : 
-                              task.urgency >= 3 ? 'medium' : 'low'
-                            }`}>
-                              Priority {task.urgency}
-                            </span>
-                          )}
+                  {meetings.map(meeting => (
+                    <div key={meeting.id} className="task-card">
+                      <div className="mb-3">
+                        <h4 className="font-medium text-sm line-clamp-2">{meeting.title}</h4>
+                        <div className="flex items-center gap-4 mt-2 text-xs opacity-70">
+                          <div className="flex items-center gap-1">
+                            <Users size={12} />
+                            <span>{meeting.attendees || 0} attendees</span>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <Clock size={12} />
+                            <span>{meeting.duration || '0m'}</span>
+                          </div>
                         </div>
-                        <button
-                          onClick={() => completeTask(task.id)}
-                          className="btn-glass px-2 py-1 text-sm rounded"
-                        >
-                          ✓
+                      </div>
+                      
+                      {meeting.actionItems && meeting.actionItems.length > 0 && (
+                        <div className="mb-3">
+                          <h5 className="text-xs font-medium opacity-80 mb-1">Action Items:</h5>
+                          <div className="space-y-1">
+                            {meeting.actionItems.slice(0, 2).map((item, index) => (
+                              <div key={index} className="text-xs opacity-70 line-clamp-1">
+                                • {item}
+                              </div>
+                            ))}
+                            {meeting.actionItems.length > 2 && (
+                              <div className="text-xs opacity-50">
+                                +{meeting.actionItems.length - 2} more...
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                      
+                      <div className="flex justify-between items-center">
+                        <span className="text-xs opacity-60">
+                          {new Date(meeting.date).toLocaleDateString()}
+                        </span>
+                        <button className="btn-glass px-2 py-1 text-xs rounded">
+                          View
                         </button>
                       </div>
                     </div>
@@ -420,6 +452,46 @@ const App = () => {
                 </div>
               )}
             </div>
+          </div>
+        )}
+
+        {activeTab === 'ai-tasks' && (
+          <div className="card-glass p-6 animate-fade-in max-w-4xl mx-auto">
+            <h2 className="text-2xl font-bold mb-4 text-glow">🤖 AI Task Management</h2>
+            {tasks.length === 0 ? (
+              <p className="opacity-70 text-center">
+                No AI tasks yet. Click Test AI to generate some!
+              </p>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {tasks.map(task => (
+                  <div key={task.id} className="task-card">
+                    <div className="flex justify-between items-start">
+                      <div className="flex-1">
+                        <h4 className="font-medium">{task.title}</h4>
+                        <span className="text-xs opacity-70">
+                          {task.source}
+                        </span>
+                        {task.urgency && (
+                          <span className={`ml-2 px-2 py-1 text-xs rounded priority-${
+                            task.urgency >= 4 ? 'high' : 
+                            task.urgency >= 3 ? 'medium' : 'low'
+                          }`}>
+                            Priority {task.urgency}
+                          </span>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => completeTask(task.id)}
+                        className="btn-glass px-2 py-1 text-sm rounded"
+                      >
+                        ✓
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -503,7 +575,7 @@ const App = () => {
         </div>
       )}
 
-      {/* Enhanced Glassy AI Chat Box */}
+      {/* Enhanced AI Chat Box */}
       <div className="ai-chat-container">
         <div className="ai-chat-box">
           {/* Chat toggle button */}
@@ -522,7 +594,7 @@ const App = () => {
             value={chatInput}
             onChange={(e) => setChatInput(e.target.value)}
             onKeyPress={(e) => e.key === 'Enter' && sendChatMessage()}
-            placeholder="Ask AI anything about your tasks, emails, or productivity..."
+            placeholder="Ask AI to manage tasks, analyze meetings, or help with productivity..."
             className="ai-chat-input"
             disabled={isAITyping}
           />
