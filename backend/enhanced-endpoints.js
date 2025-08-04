@@ -1,6 +1,9 @@
 // backend/enhanced-endpoints.js - Additional API endpoints
 // Note: app, io, and integrationService are provided by main.js as global variables
 
+// Import Magic Inbox Processor
+const MagicInboxProcessor = require('./src/ai/magicInboxProcessor');
+
 // Get integration status
 app.get('/api/integrations/status', async (req, res) => {
   try {
@@ -18,6 +21,70 @@ app.get('/api/integrations/status', async (req, res) => {
       success: false,
       error: error.message,
       integrations: {}
+    });
+  }
+});
+
+// Magic AI Inbox endpoint
+app.get('/api/ai/magic-inbox', async (req, res) => {
+  try {
+    console.log('✨ Generating Magic AI Inbox...');
+    
+    // Initialize Magic Inbox processor with available services
+    const services = {
+      gmail: integrationService.gmailService,
+      notion: integrationService.notionService,
+      fireflies: integrationService.firefliesService,
+      supabase: integrationService.supabaseService,
+      openaiKey: process.env.OPENAI_API_KEY,
+      claudeKey: process.env.ANTHROPIC_API_KEY
+    };
+    
+    const magicInbox = new MagicInboxProcessor(services);
+    const result = await magicInbox.getCachedMagicInbox();
+    
+    res.json(result);
+  } catch (error) {
+    console.error('❌ Magic Inbox failed:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      data: {
+        replySuggestions: ['Check your integrations - some services may be offline'],
+        quickWins: ['Test your AI and service connections'],
+        upcomingTasks: ['Configure your Gmail, Notion, and Fireflies integrations'],
+        waitingOn: ['System setup and API key configuration']
+      }
+    });
+  }
+});
+
+// Get Fireflies meetings
+app.get('/api/fireflies/meetings', async (req, res) => {
+  try {
+    console.log('🎙️ Fetching Fireflies meetings...');
+    
+    const result = await integrationService.getFirefliesMeetings();
+    
+    if (result.success) {
+      res.json({
+        success: true,
+        meetings: result.meetings || [],
+        count: result.meetings?.length || 0
+      });
+    } else {
+      res.status(400).json({
+        success: false,
+        error: result.error,
+        meetings: []
+      });
+    }
+  } catch (error) {
+    console.error('❌ Failed to get Fireflies meetings:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      meetings: []
     });
   }
 });
@@ -256,4 +323,4 @@ app.get('/api/test/:integration', async (req, res) => {
   }
 });
 
-console.log('🔧 Enhanced endpoints loaded');
+console.log('🔧 Enhanced endpoints loaded with Magic AI Inbox');
