@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import io from 'socket.io-client';
-import { Send, MessageCircle, Users, Clock, RotateCcw } from 'lucide-react';
+import { Send, MessageCircle, Users, Clock, RotateCcw, ChevronDown } from 'lucide-react';
 import MagicInbox from './components/MagicInbox';
 import './App.css';
 
@@ -20,7 +20,9 @@ const App = () => {
   const [isAITyping, setIsAITyping] = useState(false);
   const [showChat, setShowChat] = useState(false);
   const [selectedPerson, setSelectedPerson] = useState('All');
+  const [showPersonDropdown, setShowPersonDropdown] = useState(false);
   const [isLoadingNotion, setIsLoadingNotion] = useState(false);
+  const [isLoadingEmails, setIsLoadingEmails] = useState(false);
 
   const teamMembers = ['All', 'Alec', 'Leo', 'Steph', 'Pablo', 'Alexa'];
 
@@ -95,12 +97,15 @@ const App = () => {
   };
 
   const loadEmails = async () => {
+    setIsLoadingEmails(true);
     try {
       const response = await fetch('http://localhost:3001/api/gmail/latest?limit=10');
       const data = await response.json();
       setEmails(data.emails || []);
     } catch (error) {
       console.error('Failed to load emails:', error);
+    } finally {
+      setIsLoadingEmails(false);
     }
   };
 
@@ -337,22 +342,38 @@ const App = () => {
               <div className="flex justify-between items-center mb-4">
                 <div className="flex items-center gap-3">
                   <span className="text-2xl">📝</span>
-                  <div className="flex gap-2">
-                    {teamMembers.map(person => (
-                      <button
-                        key={person}
-                        onClick={() => setSelectedPerson(person)}
-                        className={`px-2 py-1 text-xs rounded transition-all ${
-                          selectedPerson === person
-                            ? 'bg-blue-500 bg-opacity-80 text-white'
-                            : 'btn-glass opacity-70 hover:opacity-100'
-                        }`}
-                      >
-                        {person}
-                      </button>
-                    ))}
+                  
+                  {/* Person Dropdown */}
+                  <div className="relative">
+                    <button
+                      onClick={() => setShowPersonDropdown(!showPersonDropdown)}
+                      className="btn-glass px-3 py-2 rounded-lg flex items-center gap-2 text-sm"
+                    >
+                      {selectedPerson}
+                      <ChevronDown size={14} className={`transition-transform ${showPersonDropdown ? 'rotate-180' : ''}`} />
+                    </button>
+                    
+                    {showPersonDropdown && (
+                      <div className="absolute top-full left-0 mt-1 w-32 glass rounded-lg overflow-hidden z-50">
+                        {teamMembers.map(person => (
+                          <button
+                            key={person}
+                            onClick={() => {
+                              setSelectedPerson(person);
+                              setShowPersonDropdown(false);
+                            }}
+                            className={`w-full px-3 py-2 text-left text-sm hover:bg-white hover:bg-opacity-10 transition-all ${
+                              selectedPerson === person ? 'bg-blue-500 bg-opacity-30' : ''
+                            }`}
+                          >
+                            {person}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
+                
                 <button
                   onClick={loadNotionTasks}
                   disabled={isLoadingNotion}
@@ -475,9 +496,10 @@ const App = () => {
                 <h2 className="text-xl font-bold text-glow">📧 Gmail ({emails.length})</h2>
                 <button
                   onClick={loadEmails}
-                  className="btn-glass text-sm px-3 py-1 rounded"
+                  disabled={isLoadingEmails}
+                  className="btn-glass p-2 rounded-full transition-all"
                 >
-                  🔄
+                  <RotateCcw size={16} className={isLoadingEmails ? 'animate-spin' : ''} />
                 </button>
               </div>
               {emails.length === 0 ? (
