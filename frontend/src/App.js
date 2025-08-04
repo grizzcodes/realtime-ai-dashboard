@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import io from 'socket.io-client';
 import { Send, MessageCircle, Users, Clock, RotateCcw, ChevronDown } from 'lucide-react';
 import MagicInbox from './components/MagicInbox';
+import SupaDashboard from './components/SupaDashboard';
 import './App.css';
 
 const App = () => {
@@ -280,7 +281,7 @@ const App = () => {
         </div>
         
         <div className="flex gap-2 mt-4">
-          {['dashboard', 'magic-inbox', 'integrations'].map(tab => (
+          {['dashboard', 'magic-inbox', 'supa', 'integrations'].map(tab => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -290,7 +291,9 @@ const App = () => {
                   : 'btn-glass'
               }`}
             >
-              {tab === 'magic-inbox' ? '✨ Magic Inbox' : tab.charAt(0).toUpperCase() + tab.slice(1)}
+              {tab === 'magic-inbox' ? '✨ Magic Inbox' : 
+               tab === 'supa' ? '🗄️ SUPA' :
+               tab.charAt(0).toUpperCase() + tab.slice(1)}
             </button>
           ))}
         </div>
@@ -533,6 +536,8 @@ const App = () => {
         )}
 
         {activeTab === 'magic-inbox' && <MagicInbox />}
+
+        {activeTab === 'supa' && <SupaDashboard />}
 
         {activeTab === 'integrations' && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
