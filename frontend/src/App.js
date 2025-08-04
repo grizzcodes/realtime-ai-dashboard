@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import io from 'socket.io-client';
-import { Send, MessageCircle, Users, Clock } from 'lucide-react';
+import { Send, MessageCircle, Users, Clock, RotateCcw } from 'lucide-react';
+import MagicInbox from './components/MagicInbox';
 import './App.css';
 
 const App = () => {
   const [tasks, setTasks] = useState([]);
   const [notionTasks, setNotionTasks] = useState([]);
+  const [filteredNotionTasks, setFilteredNotionTasks] = useState([]);
   const [emails, setEmails] = useState([]);
   const [meetings, setMeetings] = useState([]);
   const [isConnected, setIsConnected] = useState(false);
@@ -17,6 +19,10 @@ const App = () => {
   const [chatInput, setChatInput] = useState('');
   const [isAITyping, setIsAITyping] = useState(false);
   const [showChat, setShowChat] = useState(false);
+  const [selectedPerson, setSelectedPerson] = useState('All');
+  const [isLoadingNotion, setIsLoadingNotion] = useState(false);
+
+  const teamMembers = ['All', 'Alec', 'Leo', 'Steph', 'Pablo', 'Alexa'];
 
   useEffect(() => {
     const socket = io('http://localhost:3001');
@@ -44,6 +50,17 @@ const App = () => {
     localStorage.setItem('darkMode', darkMode);
   }, [darkMode]);
 
+  useEffect(() => {
+    // Filter Notion tasks when selection changes
+    if (selectedPerson === 'All') {
+      setFilteredNotionTasks(notionTasks);
+    } else {
+      setFilteredNotionTasks(notionTasks.filter(task => 
+        task.assignedTo && task.assignedTo.includes(selectedPerson)
+      ));
+    }
+  }, [notionTasks, selectedPerson]);
+
   const loadTasks = async () => {
     try {
       const response = await fetch('http://localhost:3001/api/tasks');
@@ -55,12 +72,25 @@ const App = () => {
   };
 
   const loadNotionTasks = async () => {
+    setIsLoadingNotion(true);
     try {
       const response = await fetch('http://localhost:3001/api/notion/tasks');
       const data = await response.json();
-      setNotionTasks(data.tasks || []);
+      
+      // Filter out completed tasks and add mock data for demo
+      const pendingTasks = (data.tasks || [])
+        .filter(task => task.status !== 'completed' && task.status !== 'Done')
+        .map(task => ({
+          ...task,
+          assignedTo: task.assignedTo || teamMembers[Math.floor(Math.random() * (teamMembers.length - 1)) + 1],
+          dueDate: task.dueDate || new Date(Date.now() + Math.random() * 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+        }));
+      
+      setNotionTasks(pendingTasks);
     } catch (error) {
       console.error('Failed to load Notion tasks:', error);
+    } finally {
+      setIsLoadingNotion(false);
     }
   };
 
@@ -245,7 +275,7 @@ const App = () => {
         </div>
         
         <div className="flex gap-2 mt-4">
-          {['dashboard', 'ai-tasks', 'integrations'].map(tab => (
+          {['dashboard', 'magic-inbox', 'integrations'].map(tab => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -255,7 +285,7 @@ const App = () => {
                   : 'btn-glass'
               }`}
             >
-              {tab === 'ai-tasks' ? 'AI Tasks' : tab.charAt(0).toUpperCase() + tab.slice(1)}
+              {tab === 'magic-inbox' ? '✨ Magic Inbox' : tab.charAt(0).toUpperCase() + tab.slice(1)}
             </button>
           ))}
         </div>
@@ -305,30 +335,55 @@ const App = () => {
             {/* Left Column - Notion Tasks */}
             <div className="card-glass p-6 animate-fade-in">
               <div className="flex justify-between items-center mb-4">
-                <h2 className="text-xl font-bold text-glow">📝 Notion Tasks ({notionTasks.length})</h2>
+                <div className="flex items-center gap-3">
+                  <span className="text-2xl">📝</span>
+                  <div className="flex gap-2">
+                    {teamMembers.map(person => (
+                      <button
+                        key={person}
+                        onClick={() => setSelectedPerson(person)}
+                        className={`px-2 py-1 text-xs rounded transition-all ${
+                          selectedPerson === person
+                            ? 'bg-blue-500 bg-opacity-80 text-white'
+                            : 'btn-glass opacity-70 hover:opacity-100'
+                        }`}
+                      >
+                        {person}
+                      </button>
+                    ))}
+                  </div>
+                </div>
                 <button
                   onClick={loadNotionTasks}
-                  className="btn-glass text-sm px-3 py-1 rounded"
+                  disabled={isLoadingNotion}
+                  className="btn-glass p-2 rounded-full transition-all"
                 >
-                  🔄
+                  <RotateCcw size={16} className={isLoadingNotion ? 'animate-spin' : ''} />
                 </button>
               </div>
-              {notionTasks.length === 0 ? (
-                <p className="opacity-70">
-                  No Notion tasks found. Check your Notion integration.
+              
+              {filteredNotionTasks.length === 0 ? (
+                <p className="opacity-70 text-center py-8">
+                  {selectedPerson === 'All' 
+                    ? 'No pending tasks found. Check your Notion integration.'
+                    : `No pending tasks for ${selectedPerson}.`
+                  }
                 </p>
               ) : (
                 <div className="space-y-3 max-h-96 overflow-y-auto">
-                  {notionTasks.map(task => (
+                  {filteredNotionTasks.map(task => (
                     <div key={task.id} className="task-card">
                       <div className="flex justify-between items-start">
                         <div className="flex-1">
                           <h4 className="font-medium">{task.title || task.name}</h4>
-                          <p className="text-sm opacity-70">
-                            {task.status || 'No status'}
-                          </p>
+                          <div className="flex items-center gap-3 mt-2 text-xs opacity-70">
+                            <span>👤 {task.assignedTo}</span>
+                            {task.dueDate && (
+                              <span>📅 {new Date(task.dueDate).toLocaleDateString()}</span>
+                            )}
+                          </div>
                           {task.priority && (
-                            <span className={`inline-block mt-1 px-2 py-1 text-xs rounded priority-${
+                            <span className={`inline-block mt-2 px-2 py-1 text-xs rounded priority-${
                               task.priority === 'High' ? 'high' :
                               task.priority === 'Medium' ? 'medium' : 'low'
                             }`}>
@@ -455,45 +510,7 @@ const App = () => {
           </div>
         )}
 
-        {activeTab === 'ai-tasks' && (
-          <div className="card-glass p-6 animate-fade-in max-w-4xl mx-auto">
-            <h2 className="text-2xl font-bold mb-4 text-glow">🤖 AI Task Management</h2>
-            {tasks.length === 0 ? (
-              <p className="opacity-70 text-center">
-                No AI tasks yet. Click Test AI to generate some!
-              </p>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {tasks.map(task => (
-                  <div key={task.id} className="task-card">
-                    <div className="flex justify-between items-start">
-                      <div className="flex-1">
-                        <h4 className="font-medium">{task.title}</h4>
-                        <span className="text-xs opacity-70">
-                          {task.source}
-                        </span>
-                        {task.urgency && (
-                          <span className={`ml-2 px-2 py-1 text-xs rounded priority-${
-                            task.urgency >= 4 ? 'high' : 
-                            task.urgency >= 3 ? 'medium' : 'low'
-                          }`}>
-                            Priority {task.urgency}
-                          </span>
-                        )}
-                      </div>
-                      <button
-                        onClick={() => completeTask(task.id)}
-                        className="btn-glass px-2 py-1 text-sm rounded"
-                      >
-                        ✓
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
+        {activeTab === 'magic-inbox' && <MagicInbox />}
 
         {activeTab === 'integrations' && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
