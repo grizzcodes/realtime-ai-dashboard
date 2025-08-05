@@ -146,12 +146,45 @@ const App = () => {
   const loadCalendarEvents = async () => {
     setIsLoadingCalendar(true);
     try {
-      const response = await fetch('http://localhost:3001/api/calendar/events');
+      const response = await fetch('http://localhost:3001/api/calendar/next-meetings?limit=5');
       const data = await response.json();
-      setCalendarEvents(data.events || []);
+      
+      if (data.success && data.meetings) {
+        // Transform the calendar data to match our frontend format
+        const events = data.meetings.map(meeting => ({
+          id: meeting.id,
+          title: meeting.title,
+          startTime: meeting.start,
+          endTime: meeting.end,
+          attendees: meeting.attendees?.map(a => a.name || a.email) || [],
+          location: meeting.location,
+          meetLink: meeting.meetLink,
+          allDay: meeting.allDay
+        }));
+        setCalendarEvents(events);
+      } else {
+        // Use fallback data if the API call fails
+        console.log('Calendar API returned no data, using fallback');
+        setCalendarEvents([
+          {
+            id: 'cal-1',
+            title: 'Product Launch Review',
+            startTime: new Date(Date.now() + 2*60*60*1000).toISOString(),
+            endTime: new Date(Date.now() + 3*60*60*1000).toISOString(),
+            attendees: ['Alec', 'Leo', 'Steph']
+          },
+          {
+            id: 'cal-2',
+            title: 'Client Onboarding',
+            startTime: new Date(Date.now() + 24*60*60*1000).toISOString(),
+            endTime: new Date(Date.now() + 25*60*60*1000).toISOString(),
+            attendees: ['Pablo', 'Alexa']
+          }
+        ]);
+      }
     } catch (error) {
       console.error('Failed to load calendar events:', error);
-      // Add fallback data for testing
+      // Use fallback data
       setCalendarEvents([
         {
           id: 'cal-1',
@@ -166,13 +199,6 @@ const App = () => {
           startTime: new Date(Date.now() + 24*60*60*1000).toISOString(),
           endTime: new Date(Date.now() + 25*60*60*1000).toISOString(),
           attendees: ['Pablo', 'Alexa']
-        },
-        {
-          id: 'cal-3',
-          title: 'Engineering Sync',
-          startTime: new Date(Date.now() + 48*60*60*1000).toISOString(),
-          endTime: new Date(Date.now() + 49*60*60*1000).toISOString(),
-          attendees: ['Leo', 'Alec']
         }
       ]);
     } finally {
@@ -510,7 +536,7 @@ const App = () => {
                 </div>
                 {calendarEvents.length === 0 ? (
                   <p className="opacity-70 text-center py-4">
-                    No upcoming events found.
+                    No upcoming events found. Check your Calendar integration.
                   </p>
                 ) : (
                   <div className="space-y-3 max-h-48 overflow-y-auto">
@@ -527,6 +553,11 @@ const App = () => {
                             </div>
                           )}
                         </div>
+                        {event.meetLink && (
+                          <a href={event.meetLink} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-400 hover:underline mt-1 inline-block">
+                            Join Meeting
+                          </a>
+                        )}
                       </div>
                     ))}
                   </div>
