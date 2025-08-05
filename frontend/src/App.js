@@ -512,7 +512,7 @@ const App = () => {
               )}
             </div>
 
-            {/* Right Column - Emails */}
+            {/* Right Column - Emails (DOUBLED HEIGHT) */}
             <div className="card-glass p-6 animate-fade-in">
               <div className="flex justify-between items-center mb-4">
                 <h2 className="text-xl font-bold text-glow">📧 Gmail ({emails.length})</h2>
@@ -529,7 +529,7 @@ const App = () => {
                   No emails found. Check your Gmail integration.
                 </p>
               ) : (
-                <div className="space-y-3 max-h-96 overflow-y-auto">
+                <div className="space-y-3 max-h-[48rem] overflow-y-auto">
                   {emails.map(email => (
                     <div key={email.id} className="task-card">
                       <div className="flex justify-between items-start">
