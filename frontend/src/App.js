@@ -279,12 +279,12 @@ const App = () => {
 
   return (
     <div className="min-h-screen">
-      {/* Header with DGenz logo */}
+      {/* Header with smaller DGenz logo and main "What's on the agenda today?" heading */}
       <div className="header-glass p-4 sticky top-0 z-40">
         <div className="flex justify-between items-center">
           <div className="flex items-center gap-3">
             <div className="dgenz-logo">🍞</div>
-            <h1 className="text-3xl font-bold text-glow">DGenz Hub</h1>
+            <h2 className="text-lg font-semibold text-glow">DGenz Hub</h2>
           </div>
           <div className="flex gap-4 items-center">
             <button
@@ -317,6 +317,13 @@ const App = () => {
               🧪 Test AI
             </button>
           </div>
+        </div>
+        
+        {/* Main heading - "What's on the agenda today?" */}
+        <div className="text-center mt-4 mb-4">
+          <h1 className="text-4xl font-bold text-glow">
+            What's on the agenda today?
+          </h1>
         </div>
         
         <div className="flex gap-2 mt-4">
@@ -467,12 +474,8 @@ const App = () => {
               )}
             </div>
 
-            {/* Middle Column - Meetings with "What's on the agenda today?" */}
+            {/* Middle Column - Meetings (removed the extra heading) */}
             <div className="card-glass p-6 animate-fade-in">
-              <h1 className="text-2xl font-bold text-glow mb-6 text-center">
-                What's on the agenda today?
-              </h1>
-              
               <div className="flex justify-between items-center mb-4">
                 <h2 className="text-xl font-bold text-glow">🎙️ Meetings ({meetings.length})</h2>
                 <button
