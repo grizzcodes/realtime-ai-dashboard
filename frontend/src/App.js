@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import io from 'socket.io-client';
-import { Send, MessageCircle, Users, Clock, RotateCcw, ChevronDown } from 'lucide-react';
+import { Send, MessageCircle, Users, Clock, RotateCcw, ChevronDown, Calendar } from 'lucide-react';
 import MagicInbox from './components/MagicInbox';
 import SupaDashboard from './components/SupaDashboard';
 import IntegrationStatusBar from './components/IntegrationStatusBar';
@@ -12,6 +12,7 @@ const App = () => {
   const [filteredNotionTasks, setFilteredNotionTasks] = useState([]);
   const [emails, setEmails] = useState([]);
   const [meetings, setMeetings] = useState([]);
+  const [calendarEvents, setCalendarEvents] = useState([]);
   const [isConnected, setIsConnected] = useState(false);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [apiStatus, setApiStatus] = useState({});
@@ -25,6 +26,7 @@ const App = () => {
   const [showPersonDropdown, setShowPersonDropdown] = useState(false);
   const [isLoadingNotion, setIsLoadingNotion] = useState(false);
   const [isLoadingEmails, setIsLoadingEmails] = useState(false);
+  const [isLoadingCalendar, setIsLoadingCalendar] = useState(false);
 
   const teamMembers = ['All', 'Alec', 'Leo', 'Steph', 'Pablo', 'Alexa'];
 
@@ -37,6 +39,7 @@ const App = () => {
     loadNotionTasks();
     loadEmails();
     loadMeetings();
+    loadCalendarEvents();
     loadApiStatus();
     
     const savedDarkMode = localStorage.getItem('darkMode') === 'true';
@@ -137,6 +140,43 @@ const App = () => {
           actionItems: ['Send proposal draft', 'Schedule technical demo']
         }
       ]);
+    }
+  };
+
+  const loadCalendarEvents = async () => {
+    setIsLoadingCalendar(true);
+    try {
+      const response = await fetch('http://localhost:3001/api/calendar/events');
+      const data = await response.json();
+      setCalendarEvents(data.events || []);
+    } catch (error) {
+      console.error('Failed to load calendar events:', error);
+      // Add fallback data for testing
+      setCalendarEvents([
+        {
+          id: 'cal-1',
+          title: 'Product Launch Review',
+          startTime: new Date(Date.now() + 2*60*60*1000).toISOString(),
+          endTime: new Date(Date.now() + 3*60*60*1000).toISOString(),
+          attendees: ['Alec', 'Leo', 'Steph']
+        },
+        {
+          id: 'cal-2',
+          title: 'Client Onboarding',
+          startTime: new Date(Date.now() + 24*60*60*1000).toISOString(),
+          endTime: new Date(Date.now() + 25*60*60*1000).toISOString(),
+          attendees: ['Pablo', 'Alexa']
+        },
+        {
+          id: 'cal-3',
+          title: 'Engineering Sync',
+          startTime: new Date(Date.now() + 48*60*60*1000).toISOString(),
+          endTime: new Date(Date.now() + 49*60*60*1000).toISOString(),
+          attendees: ['Leo', 'Alec']
+        }
+      ]);
+    } finally {
+      setIsLoadingCalendar(false);
     }
   };
 
@@ -451,72 +491,115 @@ const App = () => {
               )}
             </div>
 
-            {/* Middle Column - Fireflies Meetings */}
-            <div className="card-glass p-6 animate-fade-in">
-              <div className="flex justify-between items-center mb-4">
-                <h2 className="text-xl font-bold text-glow">🎙️ Meetings ({meetings.length})</h2>
-                <button
-                  onClick={loadMeetings}
-                  className="btn-glass text-sm px-3 py-1 rounded"
-                >
-                  🔄
-                </button>
-              </div>
-              {meetings.length === 0 ? (
-                <p className="opacity-70">
-                  No meetings found. Check your Fireflies integration.
-                </p>
-              ) : (
-                <div className="space-y-3 max-h-96 overflow-y-auto">
-                  {meetings.map(meeting => (
-                    <div key={meeting.id} className="task-card">
-                      <div className="mb-3">
-                        <h4 className="font-medium text-sm line-clamp-2">{meeting.title}</h4>
-                        <div className="flex items-center gap-4 mt-2 text-xs opacity-70">
-                          <div className="flex items-center gap-1">
-                            <Users size={12} />
-                            <span>{meeting.attendees || 0} attendees</span>
-                          </div>
-                          <div className="flex items-center gap-1">
-                            <Clock size={12} />
-                            <span>{meeting.duration || '0m'}</span>
-                          </div>
-                        </div>
-                      </div>
-                      
-                      {meeting.actionItems && meeting.actionItems.length > 0 && (
-                        <div className="mb-3">
-                          <h5 className="text-xs font-medium opacity-80 mb-1">Action Items:</h5>
-                          <div className="space-y-1">
-                            {meeting.actionItems.slice(0, 2).map((item, index) => (
-                              <div key={index} className="text-xs opacity-70 line-clamp-1">
-                                • {item}
-                              </div>
-                            ))}
-                            {meeting.actionItems.length > 2 && (
-                              <div className="text-xs opacity-50">
-                                +{meeting.actionItems.length - 2} more...
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      )}
-                      
-                      <div className="flex justify-between items-center">
-                        <span className="text-xs opacity-60">
-                          {new Date(meeting.date).toLocaleDateString()}
-                        </span>
-                        <button className="btn-glass px-2 py-1 text-xs rounded">
-                          View
-                        </button>
-                      </div>
-                    </div>
-                  ))}
+            {/* Middle Column - Calendar (NEW) + Fireflies Meetings */}
+            <div className="space-y-6">
+              {/* Calendar Events Box (NEW) */}
+              <div className="card-glass p-6 animate-fade-in">
+                <div className="flex justify-between items-center mb-4">
+                  <h2 className="text-xl font-bold text-glow flex items-center gap-2">
+                    <Calendar size={20} className="text-blue-400" />
+                    Calendar ({calendarEvents.length})
+                  </h2>
+                  <button
+                    onClick={loadCalendarEvents}
+                    disabled={isLoadingCalendar}
+                    className="btn-glass p-2 rounded-full transition-all"
+                  >
+                    <RotateCcw size={16} className={isLoadingCalendar ? 'animate-spin' : ''} />
+                  </button>
                 </div>
-              )}
+                {calendarEvents.length === 0 ? (
+                  <p className="opacity-70 text-center py-4">
+                    No upcoming events found.
+                  </p>
+                ) : (
+                  <div className="space-y-3 max-h-48 overflow-y-auto">
+                    {calendarEvents.map(event => (
+                      <div key={event.id} className="task-card">
+                        <h4 className="font-medium text-sm">{event.title}</h4>
+                        <div className="flex items-center justify-between mt-2">
+                          <div className="text-xs opacity-70">
+                            📅 {new Date(event.startTime).toLocaleDateString()} • {new Date(event.startTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                          </div>
+                          {event.attendees && (
+                            <div className="text-xs opacity-60">
+                              {event.attendees.length} attendees
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Fireflies Meetings Box (EXISTING) */}
+              <div className="card-glass p-6 animate-fade-in">
+                <div className="flex justify-between items-center mb-4">
+                  <h2 className="text-xl font-bold text-glow">🎙️ Meetings ({meetings.length})</h2>
+                  <button
+                    onClick={loadMeetings}
+                    className="btn-glass text-sm px-3 py-1 rounded"
+                  >
+                    🔄
+                  </button>
+                </div>
+                {meetings.length === 0 ? (
+                  <p className="opacity-70">
+                    No meetings found. Check your Fireflies integration.
+                  </p>
+                ) : (
+                  <div className="space-y-3 max-h-64 overflow-y-auto">
+                    {meetings.map(meeting => (
+                      <div key={meeting.id} className="task-card">
+                        <div className="mb-3">
+                          <h4 className="font-medium text-sm line-clamp-2">{meeting.title}</h4>
+                          <div className="flex items-center gap-4 mt-2 text-xs opacity-70">
+                            <div className="flex items-center gap-1">
+                              <Users size={12} />
+                              <span>{meeting.attendees || 0} attendees</span>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <Clock size={12} />
+                              <span>{meeting.duration || '0m'}</span>
+                            </div>
+                          </div>
+                        </div>
+                        
+                        {meeting.actionItems && meeting.actionItems.length > 0 && (
+                          <div className="mb-3">
+                            <h5 className="text-xs font-medium opacity-80 mb-1">Action Items:</h5>
+                            <div className="space-y-1">
+                              {meeting.actionItems.slice(0, 2).map((item, index) => (
+                                <div key={index} className="text-xs opacity-70 line-clamp-1">
+                                  • {item}
+                                </div>
+                              ))}
+                              {meeting.actionItems.length > 2 && (
+                                <div className="text-xs opacity-50">
+                                  +{meeting.actionItems.length - 2} more...
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                        
+                        <div className="flex justify-between items-center">
+                          <span className="text-xs opacity-60">
+                            {new Date(meeting.date).toLocaleDateString()}
+                          </span>
+                          <button className="btn-glass px-2 py-1 text-xs rounded">
+                            View
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
 
-            {/* Right Column - Emails */}
+            {/* Right Column - Emails (ELONGATED) */}
             <div className="card-glass p-6 animate-fade-in">
               <div className="flex justify-between items-center mb-4">
                 <h2 className="text-xl font-bold text-glow">📧 Gmail ({emails.length})</h2>
@@ -533,7 +616,7 @@ const App = () => {
                   No emails found. Check your Gmail integration.
                 </p>
               ) : (
-                <div className="space-y-3 max-h-96 overflow-y-auto">
+                <div className="space-y-3 max-h-[600px] overflow-y-auto">
                   {emails.map(email => (
                     <div key={email.id} className="task-card">
                       <div className="flex justify-between items-start">
