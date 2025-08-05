@@ -17,23 +17,55 @@ class MagicInboxProcessor {
         this.getRecentTasks(),
         this.getRecentMeetings()
       ]);
-
-      // AI analysis for each section
+  
+      // If no data available, return demo suggestions
+      if (emails.length === 0 && tasks.length === 0 && meetings.length === 0) {
+        return {
+          success: true,
+          data: {
+            replySuggestions: [
+              "Sarah from Marketing: Campaign approval needed by Friday",
+              "Client inquiry about project timeline and next steps",
+              "Team lead asking for Q4 budget estimates"
+            ],
+            quickWins: [
+              "Approve vacation request (30 seconds)",
+              "Reply 'thanks' to completed deliverable",
+              "Mark design review as done",
+              "Send quick status update to client"
+            ],
+            upcomingTasks: [
+              "Prepare slides for 3PM meeting with stakeholders",
+              "Review contract before client call tomorrow", 
+              "Update project status for weekly standup"
+            ],
+            waitingOn: [
+              "Legal review from 3 days ago - follow up needed",
+              "Budget approval sent Monday - check status",
+              "Vendor response on pricing - send reminder"
+            ]
+          },
+          metadata: {
+            totalEmails: 0,
+            totalTasks: 0,
+            totalMeetings: 0,
+            lastUpdated: new Date(),
+            demoMode: true
+          }
+        };
+      }
+  
+      // AI analysis for real data...
       const [replySuggestions, quickWins, upcomingTasks, waitingOn] = await Promise.all([
         this.analyzeReplySuggestions(emails),
         this.analyzeQuickWins(tasks, emails),
         this.analyzeUpcomingTasks(tasks, meetings),
         this.analyzeWaitingOn(emails)
       ]);
-
+  
       return {
         success: true,
-        data: {
-          replySuggestions,
-          quickWins,
-          upcomingTasks,
-          waitingOn
-        },
+        data: { replySuggestions, quickWins, upcomingTasks, waitingOn },
         metadata: {
           totalEmails: emails.length,
           totalTasks: tasks.length,
@@ -46,12 +78,7 @@ class MagicInboxProcessor {
       return {
         success: false,
         error: error.message,
-        data: {
-          replySuggestions: [],
-          quickWins: [],
-          upcomingTasks: [],
-          waitingOn: []
-        }
+        data: { replySuggestions: [], quickWins: [], upcomingTasks: [], waitingOn: [] }
       };
     }
   }
