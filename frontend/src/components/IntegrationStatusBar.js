@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 
-const IntegrationStatusBar = ({ apiStatus, onRefresh }) => {
+const IntegrationStatusBar = ({ apiStatus = {}, onRefresh }) => {
   const [lastUpdate, setLastUpdate] = useState(new Date());
   const [isMinimized, setIsMinimized] = useState(false);
 
