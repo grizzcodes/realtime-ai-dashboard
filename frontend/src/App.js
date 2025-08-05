@@ -24,6 +24,7 @@ const App = () => {
   const [showPersonDropdown, setShowPersonDropdown] = useState(false);
   const [isLoadingNotion, setIsLoadingNotion] = useState(false);
   const [isLoadingEmails, setIsLoadingEmails] = useState(false);
+  const [currentUser, setCurrentUser] = useState('Alex'); // Default user - this would come from auth
 
   const teamMembers = ['All', 'Alec', 'Leo', 'Steph', 'Pablo', 'Alexa'];
 
@@ -37,6 +38,7 @@ const App = () => {
     loadEmails();
     loadMeetings();
     loadApiStatus();
+    loadCurrentUser();
     
     const savedDarkMode = localStorage.getItem('darkMode') === 'true';
     setDarkMode(savedDarkMode);
@@ -146,6 +148,19 @@ const App = () => {
       setApiStatus(data.integrations || {});
     } catch (error) {
       console.error('Failed to load API status:', error);
+    }
+  };
+
+  const loadCurrentUser = async () => {
+    try {
+      // This would typically come from your auth system
+      // For now, using a mock user
+      const response = await fetch('http://localhost:3001/api/user/profile');
+      const data = await response.json();
+      setCurrentUser(data.user?.name || 'Alex');
+    } catch (error) {
+      console.error('Failed to load user:', error);
+      // Keep default user
     }
   };
 
@@ -279,10 +294,15 @@ const App = () => {
               {darkMode ? '☀️' : '🌙'}
             </button>
             
-            <span className={`glass px-3 py-1 rounded-full ${isConnected ? 'text-green-400' : 'text-red-400'}`}>
-              <div className={`inline-block w-2 h-2 rounded-full mr-2 ${isConnected ? 'status-connected' : 'status-disconnected'}`}></div>
-              {isConnected ? 'Connected' : 'Disconnected'}
-            </span>
+            <div className="flex flex-col items-end gap-1">
+              <span className={`glass px-3 py-1 rounded-full ${isConnected ? 'text-green-400' : 'text-red-400'}`}>
+                <div className={`inline-block w-2 h-2 rounded-full mr-2 ${isConnected ? 'status-connected' : 'status-disconnected'}`}></div>
+                {isConnected ? 'Connected' : 'Disconnected'}
+              </span>
+              <span className="text-xs opacity-70 px-2">
+                @{currentUser}
+              </span>
+            </div>
             
             <button
               onClick={() => setShowIntegrations(!showIntegrations)}
@@ -447,8 +467,12 @@ const App = () => {
               )}
             </div>
 
-            {/* Middle Column - Fireflies Meetings */}
+            {/* Middle Column - Meetings with "What's on the agenda today?" */}
             <div className="card-glass p-6 animate-fade-in">
+              <h1 className="text-2xl font-bold text-glow mb-6 text-center">
+                What's on the agenda today?
+              </h1>
+              
               <div className="flex justify-between items-center mb-4">
                 <h2 className="text-xl font-bold text-glow">🎙️ Meetings ({meetings.length})</h2>
                 <button
