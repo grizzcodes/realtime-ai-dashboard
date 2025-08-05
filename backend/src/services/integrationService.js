@@ -6,6 +6,7 @@ const NotionService = require('./notionService');
 const SupabaseService = require('./supabaseService');
 const OpenAIService = require('./openAIService');
 const ClaudeService = require('./claudeService');
+const FirefliesService = require('./firefliesService');
 
 class IntegrationService {
   constructor() {
@@ -27,6 +28,7 @@ class IntegrationService {
     this.supabaseService = new SupabaseService();
     this.openaiService = new OpenAIService();
     this.claudeService = new ClaudeService();
+    this.firefliesService = new FirefliesService();
     
     console.log('🔧 IntegrationService initialized with all services');
   }
@@ -175,46 +177,7 @@ class IntegrationService {
   }
 
   async testFirefliesConnection() {
-    try {
-      if (!process.env.FIREFLIES_API_KEY) {
-        return { 
-          success: false, 
-          error: 'Add FIREFLIES_API_KEY to .env',
-          needsAuth: true
-        };
-      }
-
-      const query = `query { user { user_id name email } }`;
-
-      const response = await fetch('https://api.fireflies.ai/graphql', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${process.env.FIREFLIES_API_KEY}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ query })
-      });
-
-      const data = await response.json();
-      
-      if (data.errors) {
-        return {
-          success: false,
-          error: `Fireflies error: ${data.errors[0].message}`
-        };
-      }
-
-      return {
-        success: true,
-        message: `Connected: ${data.data.user.name}`,
-        user: data.data.user
-      };
-    } catch (error) {
-      return {
-        success: false,
-        error: `Fireflies failed: ${error.message}`
-      };
-    }
+    return await this.firefliesService.testConnection();
   }
 
   async testNotionConnection() {
@@ -231,6 +194,56 @@ class IntegrationService {
 
   async testClaudeConnection() {
     return await this.claudeService.testConnection();
+  }
+
+  // ===== FIREFLIES MEETINGS METHOD (NEW) =====
+  async getFirefliesMeetings(limit = 10) {
+    try {
+      if (!process.env.FIREFLIES_API_KEY) {
+        return {
+          success: false,
+          error: 'Fireflies API key not configured',
+          meetings: []
+        };
+      }
+
+      const result = await this.firefliesService.getRecentTranscripts(limit);
+      
+      if (result.success && result.transcripts) {
+        // Transform Fireflies data to match our frontend format
+        const meetings = result.transcripts.map(transcript => ({
+          id: transcript.id,
+          title: transcript.title || 'Untitled Meeting',
+          date: transcript.date,
+          duration: `${Math.round(transcript.duration / 60)}m`,
+          attendees: transcript.participants?.length || 0,
+          actionItems: transcript.summary?.action_items || [],
+          keywords: transcript.summary?.keywords || [],
+          overview: transcript.summary?.overview || '',
+          meetingUrl: transcript.meeting_url,
+          participants: transcript.participants?.map(p => p.name || p.email) || []
+        }));
+
+        return {
+          success: true,
+          meetings,
+          count: meetings.length
+        };
+      } else {
+        return {
+          success: false,
+          error: result.error || 'Failed to fetch Fireflies meetings',
+          meetings: []
+        };
+      }
+    } catch (error) {
+      console.error('❌ Failed to get Fireflies meetings:', error);
+      return {
+        success: false,
+        error: error.message,
+        meetings: []
+      };
+    }
   }
 
   // ===== SIMPLIFIED METHODS FOR FRONTEND =====
