@@ -14,6 +14,21 @@ const App = () => {
   const [chatInput, setChatInput] = useState('');
   const [isAITyping, setIsAITyping] = useState(false);
   
+  // API Status for IntegrationStatusBar
+  const [apiStatus, setApiStatus] = useState({
+    openai: { success: true },
+    claude: { success: true },
+    notion: { success: true },
+    gmail: { success: true },
+    slack: { success: false },
+    calendar: { success: false },
+    fireflies: { success: false },
+    supabase: { success: true },
+    linear: { success: false },
+    github: { success: true },
+    runway: { success: false }
+  });
+  
   const [integrations, setIntegrations] = useState([
     { name: 'Gmail', status: 'connected', icon: '📧' },
     { name: 'Notion', status: 'connected', icon: '📝' },
@@ -22,6 +37,12 @@ const App = () => {
     { name: 'OpenAI', status: 'connected', icon: '🤖' },
     { name: 'Claude', status: 'connected', icon: '🧠' }
   ]);
+
+  const refreshApiStatus = async () => {
+    // Add logic to refresh API status from backend
+    console.log('Refreshing API status...');
+    // You can add actual API calls here to check status
+  };
 
   const testIntegration = async (name) => {
     console.log(`Testing ${name} integration...`);
@@ -87,8 +108,8 @@ const App = () => {
         </div>
       </header>
 
-      {/* Integration Status Bar */}
-      <IntegrationStatusBar integrations={integrations} />
+      {/* Integration Status Bar - Fixed props */}
+      <IntegrationStatusBar apiStatus={apiStatus} onRefresh={refreshApiStatus} />
 
       {/* Main Content */}
       <main className="p-4">
