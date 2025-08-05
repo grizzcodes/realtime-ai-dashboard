@@ -1,3 +1,125 @@
+import React, { useState, useEffect } from 'react';
+import './App.css';
+import SupaDashboard from './components/SupaDashboard';
+import FloatingChatbox from './components/FloatingChatbox';
+import IntegrationStatusBar from './components/IntegrationStatusBar';
+import MagicInbox from './components/MagicInbox';
+import { MessageCircle, Send, Settings } from 'lucide-react';
+
+const App = () => {
+  const [showDashboard, setShowDashboard] = useState(true);
+  const [showIntegrations, setShowIntegrations] = useState(false);
+  const [showChat, setShowChat] = useState(false);
+  const [chatMessages, setChatMessages] = useState([]);
+  const [chatInput, setChatInput] = useState('');
+  const [isAITyping, setIsAITyping] = useState(false);
+  
+  const [integrations, setIntegrations] = useState([
+    { name: 'Gmail', status: 'connected', icon: '📧' },
+    { name: 'Notion', status: 'connected', icon: '📝' },
+    { name: 'Slack', status: 'disconnected', icon: '💬' },
+    { name: 'Fireflies', status: 'disconnected', icon: '🔥' },
+    { name: 'OpenAI', status: 'connected', icon: '🤖' },
+    { name: 'Claude', status: 'connected', icon: '🧠' }
+  ]);
+
+  const testIntegration = async (name) => {
+    console.log(`Testing ${name} integration...`);
+    // Add integration test logic here
+  };
+
+  const sendChatMessage = async () => {
+    if (!chatInput.trim()) return;
+    
+    const userMessage = {
+      id: Date.now(),
+      type: 'user',
+      content: chatInput
+    };
+    
+    setChatMessages(prev => [...prev, userMessage]);
+    setChatInput('');
+    setIsAITyping(true);
+    
+    try {
+      const response = await fetch('http://localhost:3001/api/ai/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ message: chatInput })
+      });
+      
+      const data = await response.json();
+      
+      const aiMessage = {
+        id: Date.now() + 1,
+        type: 'assistant',
+        content: data.message || 'I understand your request. Let me help you with that.'
+      };
+      
+      setChatMessages(prev => [...prev, aiMessage]);
+    } catch (error) {
+      console.error('Error sending message:', error);
+      const errorMessage = {
+        id: Date.now() + 1,
+        type: 'assistant',
+        content: 'Sorry, I encountered an error. Please try again.'
+      };
+      setChatMessages(prev => [...prev, errorMessage]);
+    } finally {
+      setIsAITyping(false);
+    }
+  };
+
+  return (
+    <div className="App min-h-screen bg-gradient-to-br from-gray-900 via-blue-900 to-purple-900">
+      {/* Header */}
+      <header className="p-4 glass border-b border-white border-opacity-10">
+        <div className="max-w-7xl mx-auto flex justify-between items-center">
+          <h1 className="text-2xl font-bold text-glow">AI Hub Dashboard</h1>
+          <button 
+            onClick={() => setShowIntegrations(!showIntegrations)}
+            className="btn-glass p-2 rounded-lg"
+          >
+            <Settings size={20} />
+          </button>
+        </div>
+      </header>
+
+      {/* Integration Status Bar */}
+      <IntegrationStatusBar integrations={integrations} />
+
+      {/* Main Content */}
+      <main className="p-4">
+        {showDashboard && <SupaDashboard />}
+        <MagicInbox />
+      </main>
+
+      {/* Floating Chat */}
+      <FloatingChatbox />
+
+      {/* Integrations Panel */}
+      <div className={`fixed top-0 right-0 h-full w-80 glass transform transition-transform ${
+        showIntegrations ? 'translate-x-0' : 'translate-x-full'
+      } z-50`}>
+        <div className="p-6">
+          <div className="flex justify-between items-center mb-6">
+            <h2 className="text-xl font-bold">Integrations</h2>
+            <button 
+              onClick={() => setShowIntegrations(false)}
+              className="btn-glass p-2 rounded-lg"
+            >
+              ✕
+            </button>
+          </div>
+          
+          <div className="space-y-4">
+            {integrations.map((integration) => (
+              <div key={integration.name} className="card-glass p-4">
+                <div className="flex items-center gap-3 mb-2">
+                  <span className="text-2xl">{integration.icon}</span>
+                  <h3 className="font-semibold">{integration.name}</h3>
                 </div>
                 
                 <div className={`text-sm mb-3 ${
@@ -28,7 +150,7 @@
               </div>
             ))}
           </div>
-        )}
+        </div>
       </div>
 
       {showChat && chatMessages.length > 0 && (
