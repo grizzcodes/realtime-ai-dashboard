@@ -1,18 +1,59 @@
 // backend/src/services/firefliesService.js
-const fetch = require('node-fetch');
-
 class FirefliesService {
   constructor() {
-    this.apiKey = process.env.FIREFLIES_API_KEY;
+    this.apiKey = process.env.FIREFLIES_API_KEY || '3a4ccfdb-d221-493c-bb75-36447b54c4dd';
     this.baseUrl = 'https://api.fireflies.ai/graphql';
-    console.log('🎙️ Fireflies service initialized');
+    this.initialized = false;
+  }
+
+  async initialize() {
+    try {
+      if (!this.apiKey) {
+        console.log('⚠️ Fireflies not configured - missing API key');
+        return { success: false, error: 'Missing Fireflies API key' };
+      }
+
+      // Test the connection
+      const testResult = await this.testConnection();
+      if (testResult.success) {
+        this.initialized = true;
+        console.log('✅ Fireflies service initialized');
+        return { success: true };
+      } else {
+        console.error('❌ Fireflies initialization failed:', testResult.error);
+        return testResult;
+      }
+    } catch (error) {
+      console.error('❌ Fireflies initialization failed:', error.message);
+      return { success: false, error: error.message };
+    }
+  }
+
+  async makeGraphQLRequest(query) {
+    try {
+      const response = await fetch(this.baseUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ query })
+      });
+
+      const data = await response.json();
+      
+      if (data.errors) {
+        throw new Error(data.errors[0].message);
+      }
+
+      return data;
+    } catch (error) {
+      console.error('GraphQL request failed:', error.message);
+      throw error;
+    }
   }
 
   async testConnection() {
-    if (!this.apiKey) {
-      return { success: false, error: 'Fireflies API key not configured' };
-    }
-
     try {
       const query = `
         query {
@@ -24,33 +65,22 @@ class FirefliesService {
         }
       `;
 
-      const response = await fetch(this.baseUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this.apiKey}`
-        },
-        body: JSON.stringify({ query })
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const data = await response.json();
+      const response = await this.makeGraphQLRequest(query);
       
-      if (data.errors) {
-        throw new Error(`GraphQL error: ${data.errors[0].message}`);
+      if (response.data && response.data.user) {
+        return { 
+          success: true, 
+          message: `Connected: ${response.data.user.name}`,
+          user: response.data.user 
+        };
+      } else {
+        return { 
+          success: false, 
+          error: 'No user data received'
+        };
       }
-
-      console.log('✅ Fireflies connection successful:', data.data.user.name);
-      return { 
-        success: true, 
-        message: `Connected: ${data.data.user.name}`,
-        user: data.data.user 
-      };
     } catch (error) {
-      console.error('❌ Fireflies connection failed:', error.message);
+      console.error('Fireflies connection test failed:', error.message);
       return { 
         success: false, 
         error: error.message 
@@ -59,8 +89,8 @@ class FirefliesService {
   }
 
   async getRecentTranscripts(limit = 10) {
-    if (!this.apiKey) {
-      return { success: false, error: 'Fireflies API key not configured' };
+    if (!this.initialized) {
+      await this.initialize();
     }
 
     try {
@@ -78,10 +108,6 @@ class FirefliesService {
               action_items
               outline
             }
-            participants {
-              name
-              email
-            }
             sentences(limit: 50) {
               text
               speaker_name
@@ -91,41 +117,24 @@ class FirefliesService {
         }
       `;
 
-      const response = await fetch(this.baseUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this.apiKey}`
-        },
-        body: JSON.stringify({ query })
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const data = await response.json();
-      
-      if (data.errors) {
-        throw new Error(`GraphQL error: ${data.errors[0].message}`);
-      }
-
+      const response = await this.makeGraphQLRequest(query);
       return { 
         success: true, 
-        transcripts: data.data.transcripts 
+        transcripts: response.data.transcripts || []
       };
     } catch (error) {
       console.error('Failed to get recent transcripts:', error.message);
       return { 
         success: false, 
-        error: error.message 
+        error: error.message,
+        transcripts: []
       };
     }
   }
 
   async getTranscriptById(transcriptId) {
-    if (!this.apiKey) {
-      return { success: false, error: 'Fireflies API key not configured' };
+    if (!this.initialized) {
+      await this.initialize();
     }
 
     try {
@@ -158,28 +167,10 @@ class FirefliesService {
         }
       `;
 
-      const response = await fetch(this.baseUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this.apiKey}`
-        },
-        body: JSON.stringify({ query })
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const data = await response.json();
-      
-      if (data.errors) {
-        throw new Error(`GraphQL error: ${data.errors[0].message}`);
-      }
-
+      const response = await this.makeGraphQLRequest(query);
       return { 
         success: true, 
-        transcript: data.data.transcript 
+        transcript: response.data.transcript 
       };
     } catch (error) {
       console.error('Failed to get transcript:', error.message);
@@ -213,6 +204,45 @@ class FirefliesService {
       duration: transcript.duration,
       meetingUrl: transcript.meeting_url
     };
+  }
+
+  async getMeetings() {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+
+    try {
+      const result = await this.getRecentTranscripts(10);
+      
+      if (result.success) {
+        const meetings = result.transcripts.map(t => ({
+          id: t.id,
+          title: t.title,
+          date: t.date,
+          duration: `${Math.round(t.duration / 60)}m`,
+          attendees: t.participants ? t.participants.length : 0,
+          actionItems: t.summary?.action_items || []
+        }));
+
+        return {
+          success: true,
+          meetings
+        };
+      } else {
+        return {
+          success: false,
+          error: result.error,
+          meetings: []
+        };
+      }
+    } catch (error) {
+      console.error('Failed to get meetings:', error);
+      return {
+        success: false,
+        error: error.message,
+        meetings: []
+      };
+    }
   }
 }
 
