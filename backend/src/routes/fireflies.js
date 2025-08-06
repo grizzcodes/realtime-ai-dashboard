@@ -10,16 +10,33 @@ firefliesService.initialize();
 router.get('/meetings', async (req, res) => {
   try {
     console.log('🎙️ Fetching Fireflies meetings...');
+    
+    // First check if service is initialized
+    if (!firefliesService.initialized) {
+      console.log('⚠️ Fireflies service not initialized, initializing now...');
+      await firefliesService.initialize();
+    }
+    
     const result = await firefliesService.getMeetings();
     
-    if (result.success) {
+    console.log('📊 Fireflies result:', {
+      success: result.success,
+      meetingsCount: result.meetings?.length || 0,
+      error: result.error
+    });
+    
+    if (result.success && result.meetings && result.meetings.length > 0) {
       res.json({
         success: true,
         meetings: result.meetings,
-        count: result.meetings.length
+        count: result.meetings.length,
+        source: 'fireflies'
       });
     } else {
-      // Return demo data on failure
+      // Log why we're using demo data
+      console.log('⚠️ Using demo data because:', result.error || 'No meetings found');
+      
+      // Return demo data on failure or no meetings
       res.json({
         success: true,
         meetings: [
@@ -29,19 +46,28 @@ router.get('/meetings', async (req, res) => {
             date: new Date().toISOString(),
             duration: '30m',
             attendees: 5,
-            actionItems: ['Review sprint goals', 'Update client on progress']
+            actionItems: ['Review sprint goals', 'Update client on progress', 'Schedule design review']
           },
           {
             id: 'demo-2',
-            title: 'Client Discovery Call',
+            title: 'Client Discovery Call - TechCorp',
             date: new Date(Date.now() - 24*60*60*1000).toISOString(),
             duration: '45m',
             attendees: 3,
             actionItems: ['Send proposal draft', 'Schedule technical demo']
+          },
+          {
+            id: 'demo-3',
+            title: 'Product Strategy Meeting',
+            date: new Date(Date.now() - 2*24*60*60*1000).toISOString(),
+            duration: '60m',
+            attendees: 8,
+            actionItems: ['Finalize Q1 roadmap', 'Research competitor features', 'Update pricing model']
           }
         ],
-        count: 2,
-        message: 'Using demo data - check API connection'
+        count: 3,
+        message: result.error || 'No meetings found in Fireflies account',
+        source: 'demo'
       });
     }
   } catch (error) {
@@ -54,16 +80,33 @@ router.get('/meetings', async (req, res) => {
   }
 });
 
-// Get recent transcripts
+// Get recent transcripts with better logging
 router.get('/transcripts', async (req, res) => {
   try {
+    console.log('📜 Fetching Fireflies transcripts...');
+    
     const limit = parseInt(req.query.limit) || 10;
     const result = await firefliesService.getRecentTranscripts(limit);
     
+    console.log('📊 Transcripts result:', {
+      success: result.success,
+      count: result.transcripts?.length || 0,
+      error: result.error
+    });
+    
+    if (result.transcripts && result.transcripts.length > 0) {
+      console.log('✅ Found transcripts:', result.transcripts.map(t => ({
+        id: t.id,
+        title: t.title,
+        date: t.date
+      })));
+    }
+    
     res.json({
       success: result.success,
-      transcripts: result.transcripts,
-      count: result.transcripts.length
+      transcripts: result.transcripts || [],
+      count: result.transcripts?.length || 0,
+      error: result.error
     });
   } catch (error) {
     console.error('❌ Failed to get transcripts:', error);
@@ -75,16 +118,52 @@ router.get('/transcripts', async (req, res) => {
   }
 });
 
-// Test connection
+// Test connection with detailed info
 router.get('/test', async (req, res) => {
   try {
+    console.log('🧪 Testing Fireflies connection...');
     const result = await firefliesService.testConnection();
+    console.log('✅ Test result:', result);
     res.json(result);
   } catch (error) {
     console.error('❌ Fireflies test failed:', error);
     res.status(500).json({
       success: false,
       error: error.message
+    });
+  }
+});
+
+// Debug endpoint to check raw transcripts
+router.get('/debug', async (req, res) => {
+  try {
+    console.log('🔍 Debug: Fetching raw transcripts...');
+    
+    // Initialize if needed
+    if (!firefliesService.initialized) {
+      await firefliesService.initialize();
+    }
+    
+    // Get raw transcripts
+    const result = await firefliesService.getRecentTranscripts(5);
+    
+    res.json({
+      initialized: firefliesService.initialized,
+      apiKey: firefliesService.apiKey ? `${firefliesService.apiKey.slice(0, 8)}...` : 'MISSING',
+      success: result.success,
+      error: result.error,
+      transcriptsCount: result.transcripts?.length || 0,
+      rawData: result.transcripts || [],
+      message: result.transcripts?.length === 0 ? 
+        'No transcripts found. Make sure you have recorded meetings in Fireflies.' : 
+        'Transcripts found successfully'
+    });
+  } catch (error) {
+    console.error('❌ Debug failed:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      stack: error.stack
     });
   }
 });
