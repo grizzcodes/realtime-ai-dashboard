@@ -17,13 +17,13 @@ class SlackFirefliesService {
         return { success: false, error: 'Missing Slack token' };
       }
 
-      // Get the channel ID for fireflies-ai
+      // Get the channel ID for fireflies-ai (including private channels)
       const channelResult = await this.findChannel();
       if (channelResult.success) {
         this.channelId = channelResult.channelId;
         this.initialized = true;
         console.log('✅ Slack Fireflies service initialized');
-        console.log(`📢 Channel: #${this.channelName} (${this.channelId})`);
+        console.log(`📢 Channel: #${channelResult.channelName || this.channelName} (${this.channelId})`);
         return { success: true };
       } else {
         return channelResult;
@@ -36,8 +36,9 @@ class SlackFirefliesService {
 
   async findChannel() {
     try {
-      // List all channels to find fireflies-ai
-      const response = await fetch(`${this.baseUrl}/conversations.list`, {
+      // First try public channels
+      console.log('🔍 Searching public channels...');
+      let response = await fetch(`${this.baseUrl}/conversations.list?limit=1000`, {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${this.token}`,
@@ -45,26 +46,90 @@ class SlackFirefliesService {
         }
       });
 
-      const data = await response.json();
+      let data = await response.json();
       
       if (!data.ok) {
-        console.error('❌ Failed to list channels:', data.error);
+        console.error('❌ Failed to list public channels:', data.error);
         return { success: false, error: data.error };
       }
 
-      // Find the fireflies-ai channel
-      const channel = data.channels?.find(ch => 
+      // Find the fireflies channel in public channels
+      let channel = data.channels?.find(ch => 
         ch.name === this.channelName || 
         ch.name === 'fireflies' || 
-        ch.name_normalized?.includes('fireflies')
+        ch.name?.includes('fireflies') ||
+        ch.name?.includes('firefly')
       );
 
-      if (channel) {
-        console.log(`✅ Found channel: #${channel.name} (${channel.id})`);
-        return { success: true, channelId: channel.id, channelName: channel.name };
+      if (!channel) {
+        // Try private channels
+        console.log('🔍 Searching private channels...');
+        response = await fetch(`${this.baseUrl}/conversations.list?types=private_channel&limit=1000`, {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${this.token}`,
+            'Content-Type': 'application/json'
+          }
+        });
+
+        data = await response.json();
+        
+        if (!data.ok) {
+          console.error('❌ Failed to list private channels:', data.error);
+          if (data.error === 'missing_scope') {
+            console.error('⚠️ Bot needs groups:read scope for private channels');
+          }
+          return { success: false, error: data.error };
+        }
+
+        // Find in private channels
+        channel = data.channels?.find(ch => 
+          ch.name === this.channelName || 
+          ch.name === 'fireflies' || 
+          ch.name?.includes('fireflies') ||
+          ch.name?.includes('firefly')
+        );
+        
+        if (channel) {
+          console.log(`✅ Found PRIVATE channel: #${channel.name} (${channel.id})`);
+        }
       } else {
-        console.log('⚠️ Fireflies channel not found, will search in all channels');
-        return { success: true, channelId: null };
+        console.log(`✅ Found PUBLIC channel: #${channel.name} (${channel.id})`);
+      }
+
+      if (channel) {
+        // Check if bot is a member
+        if (!channel.is_member) {
+          console.log('⚠️ Bot is not a member of the channel!');
+          console.log('Please invite the bot to #' + channel.name);
+          return { 
+            success: false, 
+            error: `Bot not in channel. Please invite bot to #${channel.name}`,
+            channelId: channel.id,
+            channelName: channel.name
+          };
+        }
+        
+        return { 
+          success: true, 
+          channelId: channel.id, 
+          channelName: channel.name,
+          isPrivate: channel.is_private || false
+        };
+      } else {
+        console.log('⚠️ Fireflies channel not found');
+        console.log('Available channels bot can see:');
+        
+        // List all channels bot is member of
+        const allChannels = await this.listAllChannels();
+        allChannels.forEach(ch => {
+          console.log(`  - #${ch.name} (${ch.is_private ? 'private' : 'public'})`);
+        });
+        
+        return { 
+          success: false, 
+          error: 'Channel not found. Bot may not be invited to the private channel.' 
+        };
       }
     } catch (error) {
       console.error('Failed to find channel:', error);
@@ -72,7 +137,39 @@ class SlackFirefliesService {
     }
   }
 
-  async getFirefliesMessages(limit = 20) {
+  async listAllChannels() {
+    const channels = [];
+    
+    // Get public channels
+    let response = await fetch(`${this.baseUrl}/conversations.list?limit=1000`, {
+      headers: {
+        'Authorization': `Bearer ${this.token}`,
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    let data = await response.json();
+    if (data.ok && data.channels) {
+      channels.push(...data.channels.filter(ch => ch.is_member));
+    }
+    
+    // Get private channels
+    response = await fetch(`${this.baseUrl}/conversations.list?types=private_channel&limit=1000`, {
+      headers: {
+        'Authorization': `Bearer ${this.token}`,
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    data = await response.json();
+    if (data.ok && data.channels) {
+      channels.push(...data.channels);
+    }
+    
+    return channels;
+  }
+
+  async getFirefliesMessages(limit = 50) {
     if (!this.initialized) {
       await this.initialize();
     }
@@ -82,10 +179,12 @@ class SlackFirefliesService {
       
       if (this.channelId) {
         // Get messages from specific channel
+        console.log(`📨 Fetching messages from channel ${this.channelId}...`);
         messages = await this.getChannelMessages(this.channelId, limit);
       } else {
-        // Search all channels for Fireflies messages
-        messages = await this.searchFirefliesMessages(limit);
+        // If no specific channel, search all channels for Fireflies messages
+        console.log('🔍 Searching all channels for Fireflies messages...');
+        messages = await this.searchAllChannels(limit);
       }
 
       // Parse Fireflies meeting summaries
@@ -106,7 +205,7 @@ class SlackFirefliesService {
     }
   }
 
-  async getChannelMessages(channelId, limit = 20) {
+  async getChannelMessages(channelId, limit = 50) {
     try {
       const response = await fetch(`${this.baseUrl}/conversations.history?channel=${channelId}&limit=${limit}`, {
         headers: {
@@ -119,6 +218,12 @@ class SlackFirefliesService {
       
       if (!data.ok) {
         console.error('❌ Failed to get channel history:', data.error);
+        if (data.error === 'not_in_channel') {
+          console.error('Bot is not in the channel! Please invite it.');
+        }
+        if (data.error === 'missing_scope') {
+          console.error('Bot needs groups:history scope for private channels');
+        }
         return [];
       }
 
@@ -130,29 +235,30 @@ class SlackFirefliesService {
     }
   }
 
-  async searchFirefliesMessages(limit = 20) {
+  async searchAllChannels(limit = 50) {
     try {
-      // Search for messages from Fireflies bot or containing Fireflies content
-      const query = 'from:fireflies OR "Project Overview" OR "Action Items" OR "Technical Requirements"';
+      const messages = [];
+      const channels = await this.listAllChannels();
       
-      const response = await fetch(`${this.baseUrl}/search.messages?query=${encodeURIComponent(query)}&count=${limit}`, {
-        headers: {
-          'Authorization': `Bearer ${this.token}`,
-          'Content-Type': 'application/json'
+      console.log(`🔍 Searching ${channels.length} channels for Fireflies messages...`);
+      
+      for (const channel of channels) {
+        const channelMessages = await this.getChannelMessages(channel.id, 20);
+        
+        // Filter for Fireflies messages
+        const firefliesMessages = channelMessages.filter(msg => 
+          this.isFirefliesSummary(msg.text || '')
+        );
+        
+        if (firefliesMessages.length > 0) {
+          console.log(`Found ${firefliesMessages.length} Fireflies messages in #${channel.name}`);
+          messages.push(...firefliesMessages);
         }
-      });
-
-      const data = await response.json();
-      
-      if (!data.ok) {
-        console.error('❌ Failed to search messages:', data.error);
-        return [];
       }
-
-      console.log(`🔍 Found ${data.messages?.matches?.length || 0} Fireflies messages`);
-      return data.messages?.matches?.map(m => m.message) || [];
+      
+      return messages.slice(0, limit);
     } catch (error) {
-      console.error('Failed to search messages:', error);
+      console.error('Failed to search channels:', error);
       return [];
     }
   }
@@ -186,7 +292,10 @@ class SlackFirefliesService {
       'Scope Clarification',
       'Meeting Summary',
       '**Action Items:**',
-      'Budget Discussion'
+      'Budget Discussion',
+      'Mathieu',
+      'Leo',
+      'Alec'
     ];
     
     return patterns.some(pattern => text.includes(pattern));
