@@ -196,7 +196,7 @@ class IntegrationService {
     return await this.claudeService.testConnection();
   }
 
-  // ===== FIREFLIES MEETINGS METHOD (NEW) =====
+  // ===== FIREFLIES MEETINGS METHOD (UPDATED WITH SUMMARY) =====
   async getFirefliesMeetings(limit = 10) {
     try {
       if (!process.env.FIREFLIES_API_KEY) {
@@ -220,8 +220,16 @@ class IntegrationService {
           actionItems: transcript.summary?.action_items || [],
           keywords: transcript.summary?.keywords || [],
           overview: transcript.summary?.overview || '',
+          summary: transcript.summary?.overview || transcript.summary?.shorthand_bullet || 'No summary available',
+          outline: transcript.summary?.outline || [],
           meetingUrl: transcript.meeting_url,
-          participants: transcript.participants?.map(p => p.name || p.email) || []
+          participants: transcript.participants?.map(p => p.name || p.email) || [],
+          // Include first few transcript sentences as a preview
+          transcriptPreview: transcript.sentences?.slice(0, 5).map(s => ({
+            speaker: s.speaker_name,
+            text: s.text,
+            time: s.start_time
+          })) || []
         }));
 
         return {
