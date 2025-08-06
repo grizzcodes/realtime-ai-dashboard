@@ -116,9 +116,22 @@ const App = () => {
 
   const loadMeetings = async () => {
     try {
+      // First try Slack Fireflies (real meetings)
+      const slackResponse = await fetch('http://localhost:3001/api/slack-fireflies/meetings');
+      const slackData = await slackResponse.json();
+      
+      console.log('Slack Fireflies response:', slackData); // Debug log
+      
+      if (slackData.success && slackData.meetings && slackData.meetings.length > 0) {
+        console.log('Loading REAL meetings from Slack:', slackData.meetings.length);
+        setMeetings(slackData.meetings);
+        return;
+      }
+      
+      // Fallback to regular Fireflies API
       const response = await fetch('http://localhost:3001/api/fireflies/meetings');
       const data = await response.json();
-      console.log('Fireflies meetings loaded:', data.meetings); // Debug log
+      console.log('Fireflies API meetings:', data.meetings);
       setMeetings(data.meetings || []);
     } catch (error) {
       console.error('Failed to load meetings:', error);
@@ -600,11 +613,11 @@ const App = () => {
                           </div>
                         </div>
                         
-                        {meeting.summary && (
+                        {(meeting.summary || meeting.gist || meeting.overview) && (
                           <div className="mb-3">
                             <h5 className="text-xs font-medium opacity-80 mb-1">Summary:</h5>
                             <p className="text-xs opacity-70 line-clamp-3">
-                              {meeting.summary}
+                              {meeting.summary || meeting.gist || meeting.overview}
                             </p>
                           </div>
                         )}
@@ -615,7 +628,7 @@ const App = () => {
                             <div className="space-y-1">
                               {meeting.actionItems.slice(0, 2).map((item, index) => (
                                 <div key={index} className="text-xs opacity-70 line-clamp-1">
-                                  • {item}
+                                  • {typeof item === 'string' ? item : item.task || item}
                                 </div>
                               ))}
                               {meeting.actionItems.length > 2 && (
@@ -631,9 +644,16 @@ const App = () => {
                           <span className="text-xs opacity-60">
                             {new Date(meeting.date).toLocaleDateString()}
                           </span>
-                          <button className="btn-glass px-2 py-1 text-xs rounded">
-                            View
-                          </button>
+                          {meeting.firefliesUrl && meeting.firefliesUrl !== '#' && (
+                            <a 
+                              href={meeting.firefliesUrl || meeting.meetingUrl} 
+                              target="_blank" 
+                              rel="noopener noreferrer"
+                              className="btn-glass px-2 py-1 text-xs rounded"
+                            >
+                              View
+                            </a>
+                          )}
                         </div>
                       </div>
                     ))}
