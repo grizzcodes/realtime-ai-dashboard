@@ -132,20 +132,25 @@ class SlackFirefliesService {
         messages = await this.getChannelMessages(this.channelId, limit);
       }
 
+      console.log(`🔍 Processing ${messages.length} Slack messages...`);
+      
       // Parse Fireflies meeting summaries
       const meetings = this.parseFirefliesMeetings(messages);
       
       return {
         success: true,
         meetings,
-        rawMessages: messages.length
+        count: meetings.length,
+        message: `Checked ${messages.length} Slack messages, found ${meetings.length} Fireflies summaries`,
+        source: 'slack'
       };
     } catch (error) {
       console.error('Failed to get Fireflies messages:', error);
       return {
         success: false,
         error: error.message,
-        meetings: []
+        meetings: [],
+        source: 'slack'
       };
     }
   }
@@ -180,8 +185,9 @@ class SlackFirefliesService {
     for (const message of messages) {
       const text = message.text || '';
       
-      // Check if this is a Fireflies meeting summary
+      // More lenient check for Fireflies messages
       if (this.isFirefliesSummary(text)) {
+        console.log('📝 Found Fireflies message:', text.substring(0, 100));
         const meeting = this.parseFirefliesMeeting(message);
         if (meeting) {
           meetings.push(meeting);
@@ -194,9 +200,34 @@ class SlackFirefliesService {
   }
 
   isFirefliesSummary(text) {
-    // Check for Fireflies meeting format
-    return text.includes('app.fireflies.ai/view/') || 
-           (text.includes('*Title:') && text.includes('*Date and Time:*'));
+    // More lenient patterns to catch Fireflies messages
+    const patterns = [
+      'fireflies.ai/view/',              // Fireflies link
+      '*Title:',                          // Title marker
+      '*Date and Time:*',                 // Date marker
+      '*Participants:*',                  // Participants marker
+      '*Gist:*',                          // Gist marker
+      '*Overview:*',                      // Overview marker
+      '<https://app.fireflies.ai',        // Slack formatted link
+    ];
+    
+    // Check if text contains any of the patterns
+    const isFireflies = patterns.some(pattern => text.includes(pattern));
+    
+    if (!isFireflies && text.length > 50) {
+      // Additional check for text that might be formatted differently
+      const hasStructuredContent = 
+        (text.includes('Meeting') || text.includes('Call')) &&
+        (text.includes('PDT') || text.includes('PST') || text.includes('EST')) &&
+        (text.includes('@') || text.includes('Participants'));
+      
+      if (hasStructuredContent) {
+        console.log('📋 Found potential meeting content without standard markers');
+        return true;
+      }
+    }
+    
+    return isFireflies;
   }
 
   parseFirefliesMeeting(message) {
@@ -207,12 +238,22 @@ class SlackFirefliesService {
     let title = 'Meeting';
     const titleMatch = text.match(/\|([^>]+)>/);
     if (titleMatch) {
-      title = titleMatch[1].replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+      title = titleMatch[1]
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&amp;/g, '&')
+        .trim();
+    } else {
+      // Try alternative title extraction
+      const altTitleMatch = text.match(/\*Title:\s*([^*\n]+)/);
+      if (altTitleMatch) {
+        title = altTitleMatch[1].trim();
+      }
     }
     
     // Extract meeting URL
     let meetingUrl = '#';
-    const urlMatch = text.match(/https:\/\/app\.fireflies\.ai\/view\/[^|]+/);
+    const urlMatch = text.match(/https:\/\/app\.fireflies\.ai\/view\/[^|\s>]+/);
     if (urlMatch) {
       meetingUrl = urlMatch[0];
     }
@@ -220,56 +261,113 @@ class SlackFirefliesService {
     // Extract date and time
     let meetingDate = timestamp;
     let duration = '';
-    const dateMatch = text.match(/\*Date and Time:\*\s*\n?([^*\n]+)/);
-    if (dateMatch) {
-      const dateInfo = dateMatch[1].trim();
-      // Parse date like "Tue, Aug 5th - 12:30 PM PDT (18 mins)"
-      const durationMatch = dateInfo.match(/\((\d+\s*mins?)\)/);
-      if (durationMatch) {
-        duration = durationMatch[1];
-      }
-      
-      // Try to parse the date
-      const datePartMatch = dateInfo.match(/([A-Z][a-z]{2}, [A-Z][a-z]{2} \d+(?:st|nd|rd|th)?)/);
-      if (datePartMatch) {
-        const datePart = datePartMatch[1];
-        const year = new Date().getFullYear();
-        try {
-          meetingDate = new Date(`${datePart}, ${year}`);
-        } catch (e) {
-          // Keep original timestamp if parsing fails
+    let meetingTime = '';
+    
+    // Try multiple date formats
+    const datePatterns = [
+      /\*Date and Time:\*\s*\n?([^*\n]+)/,
+      /Date:\s*([^*\n]+)/,
+      /([A-Z][a-z]{2}, [A-Z][a-z]{2} \d+(?:st|nd|rd|th)?)\s*[-–]\s*([\d:]+\s*[AP]M\s*[A-Z]{2,3})\s*\((\d+\s*mins?)\)/
+    ];
+    
+    for (const pattern of datePatterns) {
+      const match = text.match(pattern);
+      if (match) {
+        const dateInfo = match[0];
+        
+        // Extract duration
+        const durationMatch = dateInfo.match(/\((\d+\s*mins?)\)/);
+        if (durationMatch) {
+          duration = durationMatch[1];
         }
+        
+        // Extract time
+        const timeMatch = dateInfo.match(/([\d:]+\s*[AP]M)/);
+        if (timeMatch) {
+          meetingTime = timeMatch[1];
+        }
+        
+        // Try to parse the date
+        const datePartMatch = dateInfo.match(/([A-Z][a-z]{2}, [A-Z][a-z]{2} \d+(?:st|nd|rd|th)?)/);
+        if (datePartMatch) {
+          const datePart = datePartMatch[1].replace(/(\d+)(st|nd|rd|th)/, '$1');
+          const year = new Date().getFullYear();
+          try {
+            const parsedDate = new Date(`${datePart}, ${year} ${meetingTime}`);
+            if (!isNaN(parsedDate.getTime())) {
+              meetingDate = parsedDate;
+            }
+          } catch (e) {
+            console.log('Date parsing failed:', e);
+          }
+        }
+        break;
       }
     }
     
     // Extract participants
     let participants = [];
-    const participantsMatch = text.match(/\*Participants:\*\s*\n?([^*\n]+)/);
-    if (participantsMatch) {
-      const participantsList = participantsMatch[1].trim();
-      participants = participantsList.split(/,\s*/).map(p => p.trim()).filter(p => p);
+    const participantsPatterns = [
+      /\*Participants:\*\s*\n?([^*\n]+)/,
+      /Participants:\s*([^*\n]+)/
+    ];
+    
+    for (const pattern of participantsPatterns) {
+      const match = text.match(pattern);
+      if (match) {
+        const participantsList = match[1].trim();
+        participants = participantsList
+          .split(/[,;]/)
+          .map(p => p.trim())
+          .filter(p => p && p.length > 2);
+        break;
+      }
     }
     
     // Extract gist/summary
-    let overview = '';
-    const gistMatch = text.match(/\*Gist:\*\s*\n?([^*\n]+)/);
-    if (gistMatch) {
-      overview = gistMatch[1].trim();
+    let gist = '';
+    const gistPatterns = [
+      /\*Gist:\*\s*\n?([^*\n]+)/,
+      /Gist:\s*([^*\n]+)/,
+      /Summary:\s*([^*\n]+)/
+    ];
+    
+    for (const pattern of gistPatterns) {
+      const match = text.match(pattern);
+      if (match) {
+        gist = match[1].trim();
+        break;
+      }
     }
     
-    // Extract overview points if available
+    // Extract overview and action items
+    let overview = '';
     let actionItems = [];
+    
     const overviewMatch = text.match(/\*Overview:\*\s*\n?([\s\S]*?)(?=\*|$)/);
     if (overviewMatch) {
       const overviewText = overviewMatch[1].trim();
-      // Each line starting with - is an action item or key point
-      const items = overviewText.split('\n').filter(line => line.trim().startsWith('-'));
-      actionItems = items.map(item => item.replace(/^-\s*/, '').trim()).filter(item => item);
+      overview = overviewText;
       
-      // If no overview but we have the text, use first part as overview
-      if (!overview && overviewText) {
-        overview = overviewText.substring(0, 200) + (overviewText.length > 200 ? '...' : '');
-      }
+      // Extract bullet points as action items
+      const bullets = overviewText.split(/\n/).filter(line => {
+        const trimmed = line.trim();
+        return trimmed.startsWith('-') || trimmed.startsWith('•') || trimmed.startsWith('*');
+      });
+      
+      actionItems = bullets.map(item => 
+        item.replace(/^[-•*]\s*/, '').trim()
+      ).filter(item => item.length > 10);
+    }
+    
+    // If no overview but we have gist, use that
+    if (!overview && gist) {
+      overview = gist;
+    }
+    
+    // If still no overview, use first part of text
+    if (!overview && text.length > 100) {
+      overview = text.substring(0, 200) + '...';
     }
     
     return {
@@ -277,15 +375,18 @@ class SlackFirefliesService {
       title: title,
       date: meetingDate.toISOString(),
       dateFormatted: meetingDate.toLocaleDateString(),
-      timeFormatted: meetingDate.toLocaleTimeString(),
+      timeFormatted: meetingTime || meetingDate.toLocaleTimeString(),
       duration: duration,
       attendees: participants.length,
       participants: participants,
-      actionItems: actionItems.slice(0, 5), // Limit to 5 items for display
-      overview: overview,
+      actionItems: actionItems.slice(0, 10), // Limit to 10 items
+      overview: overview.substring(0, 500),
+      gist: gist,
       source: 'slack-fireflies',
       meetingUrl: meetingUrl,
-      slackTimestamp: message.ts
+      firefliesUrl: meetingUrl,
+      slackTimestamp: message.ts,
+      rawText: text.substring(0, 200) // For debugging
     };
   }
 
@@ -319,6 +420,27 @@ class SlackFirefliesService {
         error: error.message
       };
     }
+  }
+
+  // Debug endpoint to see raw messages
+  async getDebugInfo() {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+
+    const messages = await this.getChannelMessages(this.channelId, 10);
+    
+    return {
+      success: true,
+      channelId: this.channelId,
+      messagesFound: messages.length,
+      messages: messages.map(msg => ({
+        text: msg.text?.substring(0, 200),
+        timestamp: new Date(parseFloat(msg.ts) * 1000).toISOString(),
+        user: msg.user,
+        isFireflies: this.isFirefliesSummary(msg.text || '')
+      }))
+    };
   }
 }
 
