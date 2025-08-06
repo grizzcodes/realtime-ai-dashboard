@@ -118,6 +118,7 @@ const App = () => {
     try {
       const response = await fetch('http://localhost:3001/api/fireflies/meetings');
       const data = await response.json();
+      console.log('Fireflies meetings loaded:', data.meetings); // Debug log
       setMeetings(data.meetings || []);
     } catch (error) {
       console.error('Failed to load meetings:', error);
@@ -129,6 +130,7 @@ const App = () => {
           date: new Date().toISOString(),
           duration: '30m',
           attendees: 5,
+          summary: 'Discussed sprint progress, blockers, and upcoming deadlines. Team is on track for release.',
           actionItems: ['Review sprint goals', 'Update client on progress', 'Schedule design review']
         },
         {
@@ -137,6 +139,7 @@ const App = () => {
           date: new Date(Date.now() - 24*60*60*1000).toISOString(),
           duration: '45m',
           attendees: 3,
+          summary: 'Initial discovery call with TechCorp to understand their requirements for the new platform.',
           actionItems: ['Send proposal draft', 'Schedule technical demo']
         }
       ]);
@@ -564,7 +567,7 @@ const App = () => {
                 )}
               </div>
 
-              {/* Fireflies Meetings Box (EXISTING) */}
+              {/* Fireflies Meetings Box (UPDATED WITH SUMMARY) */}
               <div className="card-glass p-6 animate-fade-in">
                 <div className="flex justify-between items-center mb-4">
                   <h2 className="text-xl font-bold text-glow">🎙️ Meetings ({meetings.length})</h2>
@@ -596,6 +599,15 @@ const App = () => {
                             </div>
                           </div>
                         </div>
+                        
+                        {meeting.summary && (
+                          <div className="mb-3">
+                            <h5 className="text-xs font-medium opacity-80 mb-1">Summary:</h5>
+                            <p className="text-xs opacity-70 line-clamp-3">
+                              {meeting.summary}
+                            </p>
+                          </div>
+                        )}
                         
                         {meeting.actionItems && meeting.actionItems.length > 0 && (
                           <div className="mb-3">
