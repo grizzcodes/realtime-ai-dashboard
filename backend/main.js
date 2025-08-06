@@ -46,9 +46,13 @@ app.get('/health', (req, res) => {
 require('./server.js'); // Gmail routes
 require('./enhanced-endpoints.js'); // Additional endpoints
 
-// Fireflies routes
+// Fireflies routes (direct API)
 const firefliesRoutes = require('./src/routes/fireflies');
 app.use('/api/fireflies', firefliesRoutes);
+
+// Slack Fireflies routes (fetch from Slack)
+const slackFirefliesRoutes = require('./src/routes/slack-fireflies');
+app.use('/api/slack-fireflies', slackFirefliesRoutes);
 
 // WebSocket connection handling
 io.on('connection', (socket) => {
@@ -66,6 +70,7 @@ server.listen(PORT, () => {
   console.log(`📊 Dashboard: http://localhost:${PORT}/health`);
   console.log('🔗 WebSocket server active');
   console.log('🎙️ Fireflies API integrated');
+  console.log('💬 Slack Fireflies integration available');
 });
 
 // Graceful shutdown
