@@ -134,6 +134,50 @@ router.get('/test', async (req, res) => {
   }
 });
 
+// Get user info including recent meetings
+router.get('/user', async (req, res) => {
+  try {
+    console.log('👤 Getting user info...');
+    const result = await firefliesService.getUserRecentMeeting();
+    
+    if (result.success && result.user) {
+      console.log('📊 User has:', {
+        transcripts: result.user.num_transcripts,
+        recentMeeting: result.user.recent_meeting,
+        recentTranscript: result.user.recent_transcript
+      });
+      
+      // If user has a recent transcript, fetch it
+      if (result.user.recent_transcript) {
+        const transcriptResult = await firefliesService.getTranscriptById(result.user.recent_transcript);
+        
+        res.json({
+          success: true,
+          user: result.user,
+          recentTranscript: transcriptResult.transcript || null
+        });
+      } else {
+        res.json({
+          success: true,
+          user: result.user,
+          message: 'No recent transcripts found'
+        });
+      }
+    } else {
+      res.json({
+        success: false,
+        error: result.error || 'Failed to get user data'
+      });
+    }
+  } catch (error) {
+    console.error('❌ Failed to get user info:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 // Debug endpoint to check raw transcripts
 router.get('/debug', async (req, res) => {
   try {
@@ -144,12 +188,16 @@ router.get('/debug', async (req, res) => {
       await firefliesService.initialize();
     }
     
+    // Get user info first
+    const userResult = await firefliesService.getUserRecentMeeting();
+    
     // Get raw transcripts
     const result = await firefliesService.getRecentTranscripts(5);
     
     res.json({
       initialized: firefliesService.initialized,
       apiKey: firefliesService.apiKey ? `${firefliesService.apiKey.slice(0, 8)}...` : 'MISSING',
+      user: userResult.user || null,
       success: result.success,
       error: result.error,
       transcriptsCount: result.transcripts?.length || 0,
