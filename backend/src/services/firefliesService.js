@@ -1,4 +1,6 @@
 // backend/src/services/firefliesService.js
+const fetch = require('node-fetch');
+
 class FirefliesService {
   constructor() {
     this.apiKey = process.env.FIREFLIES_API_KEY || '3a4ccfdb-d221-493c-bb75-36447b54c4dd';
@@ -13,7 +15,6 @@ class FirefliesService {
         return { success: false, error: 'Missing Fireflies API key' };
       }
 
-      // Test the connection
       const testResult = await this.testConnection();
       if (testResult.success) {
         this.initialized = true;
@@ -31,6 +32,8 @@ class FirefliesService {
 
   async makeGraphQLRequest(query, variables = {}) {
     try {
+      console.log('📡 Making GraphQL request with variables:', variables);
+      
       const response = await fetch(this.baseUrl, {
         method: 'POST',
         headers: {
@@ -46,6 +49,7 @@ class FirefliesService {
       const data = await response.json();
       
       if (data.errors) {
+        console.error('❌ GraphQL errors:', data.errors);
         throw new Error(data.errors[0].message);
       }
 
@@ -91,16 +95,16 @@ class FirefliesService {
     }
   }
 
-  async getRecentTranscripts(limit = 10) {
+  async getRecentTranscripts(limit = 10, skip = 0) {
     if (!this.initialized) {
       await this.initialize();
     }
 
     try {
-      // Updated query based on Fireflies docs - using proper fields
+      // Use simpler query first to see what we get
       const query = `
-        query Transcripts($limit: Int) {
-          transcripts(limit: $limit) {
+        query GetTranscripts($limit: Int, $skip: Int) {
+          transcripts(limit: $limit, skip: $skip) {
             id
             title
             date
@@ -117,20 +121,17 @@ class FirefliesService {
               shorthand_bullet
               overview
             }
-            user {
-              user_id
-              email
-              name
-            }
           }
         }
       `;
 
-      const response = await this.makeGraphQLRequest(query, { limit });
+      console.log('🎙️ Fetching transcripts with limit:', limit, 'skip:', skip);
+      const response = await this.makeGraphQLRequest(query, { limit, skip });
       
       console.log('📊 Transcripts response:', {
         hasData: !!response.data,
-        transcriptsCount: response.data?.transcripts?.length || 0
+        transcriptsCount: response.data?.transcripts?.length || 0,
+        firstTranscript: response.data?.transcripts?.[0]?.title || 'none'
       });
       
       return { 
@@ -153,8 +154,9 @@ class FirefliesService {
     }
 
     try {
+      // Simpler query to start
       const query = `
-        query Transcript($transcriptId: String!) {
+        query GetTranscript($transcriptId: String!) {
           transcript(id: $transcriptId) {
             id
             title
@@ -172,26 +174,19 @@ class FirefliesService {
               outline
               shorthand_bullet
             }
-            sentences {
-              text
-              speaker_name
-              start_time
-              end_time
-            }
-            speakers {
-              id
-              name
-            }
-            user {
-              user_id
-              email
-              name
-            }
           }
         }
       `;
 
+      console.log('📜 Fetching transcript with ID:', transcriptId);
       const response = await this.makeGraphQLRequest(query, { transcriptId });
+      
+      console.log('📊 Transcript response:', {
+        hasData: !!response.data,
+        hasTranscript: !!response.data?.transcript,
+        title: response.data?.transcript?.title || 'none'
+      });
+      
       return { 
         success: true, 
         transcript: response.data?.transcript 
@@ -205,56 +200,57 @@ class FirefliesService {
     }
   }
 
-  extractActionableContent(transcript) {
-    const actionItems = transcript.summary?.action_items || [];
-    const keywords = transcript.summary?.keywords || [];
-    const overview = transcript.summary?.overview || '';
-
-    const sentences = transcript.sentences || [];
-    const urgentSentences = sentences.filter(s => 
-      s.text?.toLowerCase().includes('urgent') ||
-      s.text?.toLowerCase().includes('deadline') ||
-      s.text?.toLowerCase().includes('asap') ||
-      s.text?.toLowerCase().includes('priority')
-    );
-
-    return {
-      title: transcript.title,
-      actionItems,
-      keywords,
-      overview,
-      urgentSentences,
-      participants: transcript.participants || [],
-      duration: transcript.duration,
-      meetingUrl: transcript.meeting_url
-    };
-  }
-
   async getMeetings() {
     if (!this.initialized) {
       await this.initialize();
     }
 
     try {
-      const result = await this.getRecentTranscripts(10);
+      // Try multiple approaches to get meetings
+      console.log('🎯 Attempting to fetch meetings...');
       
-      console.log('🎙️ getMeetings result:', {
+      // First try with no parameters
+      let result = await this.getRecentTranscripts(20, 0);
+      
+      // If no transcripts, try with different parameters
+      if (!result.transcripts || result.transcripts.length === 0) {
+        console.log('⚠️ No transcripts with default query, trying user-specific query...');
+        
+        // Try getting user's recent transcript directly
+        const userResult = await this.getUserRecentMeeting();
+        if (userResult.success && userResult.user?.recent_transcript) {
+          const transcriptResult = await this.getTranscriptById(userResult.user.recent_transcript);
+          if (transcriptResult.success && transcriptResult.transcript) {
+            result.transcripts = [transcriptResult.transcript];
+          }
+        }
+      }
+      
+      console.log('🎙️ getMeetings final result:', {
         success: result.success,
         transcriptsCount: result.transcripts?.length || 0
       });
       
       if (result.success && result.transcripts && result.transcripts.length > 0) {
-        const meetings = result.transcripts.map(t => ({
-          id: t.id,
-          title: t.title || 'Untitled Meeting',
-          date: t.date,
-          duration: t.duration ? `${Math.round(t.duration / 60)}m` : 'N/A',
-          attendees: t.participants?.length || 0,
-          actionItems: t.summary?.action_items || [],
-          overview: t.summary?.overview || '',
-          keywords: t.summary?.keywords || [],
-          host: t.host_email || t.organizer_email || 'Unknown'
-        }));
+        const meetings = result.transcripts.map(t => {
+          // Parse the date properly
+          const meetingDate = t.date ? new Date(parseInt(t.date)) : new Date();
+          
+          return {
+            id: t.id,
+            title: t.title || 'Untitled Meeting',
+            date: meetingDate.toISOString(),
+            dateFormatted: meetingDate.toLocaleDateString(),
+            duration: t.duration ? `${Math.round(t.duration / 60)}m` : 'N/A',
+            attendees: Array.isArray(t.participants) ? t.participants.length : 0,
+            participants: t.participants || [],
+            actionItems: t.summary?.action_items || [],
+            overview: t.summary?.overview || t.summary?.shorthand_bullet || '',
+            keywords: t.summary?.keywords || [],
+            host: t.host_email || t.organizer_email || 'Unknown',
+            meetingUrl: t.meeting_url || '#'
+          };
+        });
 
         return {
           success: true,
@@ -277,7 +273,6 @@ class FirefliesService {
     }
   }
 
-  // Get user's recent meeting
   async getUserRecentMeeting() {
     try {
       const query = `
@@ -319,6 +314,44 @@ class FirefliesService {
       return {
         success: false,
         error: error.message
+      };
+    }
+  }
+
+  // Alternative method using user_id filter
+  async getUserTranscripts(userId, limit = 10) {
+    try {
+      const query = `
+        query GetUserTranscripts($userId: String, $limit: Int) {
+          transcripts(user_id: $userId, limit: $limit) {
+            id
+            title
+            date
+            duration
+            meeting_url
+            participants
+            summary {
+              action_items
+              overview
+              keywords
+            }
+          }
+        }
+      `;
+
+      console.log('🔍 Fetching transcripts for user:', userId);
+      const response = await this.makeGraphQLRequest(query, { userId, limit });
+      
+      return {
+        success: true,
+        transcripts: response.data?.transcripts || []
+      };
+    } catch (error) {
+      console.error('Failed to get user transcripts:', error);
+      return {
+        success: false,
+        error: error.message,
+        transcripts: []
       };
     }
   }
