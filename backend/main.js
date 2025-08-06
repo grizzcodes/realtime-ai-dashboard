@@ -46,6 +46,10 @@ app.get('/health', (req, res) => {
 require('./server.js'); // Gmail routes
 require('./enhanced-endpoints.js'); // Additional endpoints
 
+// Fireflies routes
+const firefliesRoutes = require('./src/routes/fireflies');
+app.use('/api/fireflies', firefliesRoutes);
+
 // WebSocket connection handling
 io.on('connection', (socket) => {
   console.log('📱 Client connected:', socket.id);
@@ -61,6 +65,7 @@ server.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`📊 Dashboard: http://localhost:${PORT}/health`);
   console.log('🔗 WebSocket server active');
+  console.log('🎙️ Fireflies API integrated');
 });
 
 // Graceful shutdown
