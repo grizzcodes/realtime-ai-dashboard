@@ -135,13 +135,36 @@ class SlackFirefliesService {
       console.log(`🔍 Processing ${messages.length} Slack messages...`);
       
       // Parse Fireflies meeting summaries
-      const meetings = this.parseFirefliesMeetings(messages);
+      const meetings = [];
+      
+      for (const message of messages) {
+        const text = message.text || '';
+        
+        // Check if this is a Fireflies message
+        if (this.isFirefliesSummary(text)) {
+          console.log('📝 Found Fireflies message, parsing...');
+          
+          try {
+            const meeting = this.parseFirefliesMeeting(message);
+            if (meeting) {
+              meetings.push(meeting);
+              console.log(`✅ Parsed meeting: ${meeting.title}`);
+            } else {
+              console.log('⚠️ Could not parse meeting from message');
+            }
+          } catch (error) {
+            console.error('❌ Error parsing meeting:', error);
+          }
+        }
+      }
+      
+      console.log(`📊 Successfully parsed ${meetings.length} meetings`);
       
       return {
         success: true,
         meetings,
         count: meetings.length,
-        message: `Checked ${messages.length} Slack messages, found ${meetings.length} Fireflies summaries`,
+        message: `Found ${meetings.length} Fireflies meetings from ${messages.length} Slack messages`,
         source: 'slack'
       };
     } catch (error) {
@@ -179,215 +202,158 @@ class SlackFirefliesService {
     }
   }
 
-  parseFirefliesMeetings(messages) {
-    const meetings = [];
-    
-    for (const message of messages) {
-      const text = message.text || '';
-      
-      // More lenient check for Fireflies messages
-      if (this.isFirefliesSummary(text)) {
-        console.log('📝 Found Fireflies message:', text.substring(0, 100));
-        const meeting = this.parseFirefliesMeeting(message);
-        if (meeting) {
-          meetings.push(meeting);
-        }
-      }
-    }
-
-    console.log(`📊 Parsed ${meetings.length} meetings from Slack messages`);
-    return meetings;
-  }
-
   isFirefliesSummary(text) {
-    // More lenient patterns to catch Fireflies messages
+    // Check for Fireflies patterns
     const patterns = [
-      'fireflies.ai/view/',              // Fireflies link
-      '*Title:',                          // Title marker
-      '*Date and Time:*',                 // Date marker
-      '*Participants:*',                  // Participants marker
-      '*Gist:*',                          // Gist marker
-      '*Overview:*',                      // Overview marker
-      '<https://app.fireflies.ai',        // Slack formatted link
+      'fireflies.ai/view/',
+      '*Title:',
+      '*Date and Time:*',
+      '<https://app.fireflies.ai'
     ];
     
-    // Check if text contains any of the patterns
-    const isFireflies = patterns.some(pattern => text.includes(pattern));
-    
-    if (!isFireflies && text.length > 50) {
-      // Additional check for text that might be formatted differently
-      const hasStructuredContent = 
-        (text.includes('Meeting') || text.includes('Call')) &&
-        (text.includes('PDT') || text.includes('PST') || text.includes('EST')) &&
-        (text.includes('@') || text.includes('Participants'));
-      
-      if (hasStructuredContent) {
-        console.log('📋 Found potential meeting content without standard markers');
-        return true;
-      }
-    }
-    
-    return isFireflies;
+    return patterns.some(pattern => text.includes(pattern));
   }
 
   parseFirefliesMeeting(message) {
     const text = message.text || '';
     const timestamp = message.ts ? new Date(parseFloat(message.ts) * 1000) : new Date();
     
-    // Extract meeting title from the link text
+    console.log('Parsing message text:', text.substring(0, 100));
+    
+    // Extract title from Slack formatted link
     let title = 'Meeting';
-    const titleMatch = text.match(/\|([^>]+)>/);
+    // Pattern: <https://app.fireflies.ai/view/MEETING_ID|Meeting Title>
+    const titleMatch = text.match(/<https:\/\/app\.fireflies\.ai\/view\/[^|]+\|([^>]+)>/);
     if (titleMatch) {
       title = titleMatch[1]
         .replace(/&lt;/g, '<')
         .replace(/&gt;/g, '>')
         .replace(/&amp;/g, '&')
         .trim();
-    } else {
-      // Try alternative title extraction
-      const altTitleMatch = text.match(/\*Title:\s*([^*\n]+)/);
-      if (altTitleMatch) {
-        title = altTitleMatch[1].trim();
-      }
+      console.log('Extracted title:', title);
     }
     
     // Extract meeting URL
     let meetingUrl = '#';
-    const urlMatch = text.match(/https:\/\/app\.fireflies\.ai\/view\/[^|\s>]+/);
+    const urlMatch = text.match(/https:\/\/app\.fireflies\.ai\/view\/[^|>]+/);
     if (urlMatch) {
       meetingUrl = urlMatch[0];
     }
     
-    // Extract date and time
+    // Extract date, time, and duration
     let meetingDate = timestamp;
-    let duration = '';
     let meetingTime = '';
+    let duration = '';
     
-    // Try multiple date formats
-    const datePatterns = [
-      /\*Date and Time:\*\s*\n?([^*\n]+)/,
-      /Date:\s*([^*\n]+)/,
-      /([A-Z][a-z]{2}, [A-Z][a-z]{2} \d+(?:st|nd|rd|th)?)\s*[-–]\s*([\d:]+\s*[AP]M\s*[A-Z]{2,3})\s*\((\d+\s*mins?)\)/
-    ];
-    
-    for (const pattern of datePatterns) {
-      const match = text.match(pattern);
-      if (match) {
-        const dateInfo = match[0];
+    // Pattern: *Date and Time:*\nDay, Month Date - Time (duration)
+    const dateTimeMatch = text.match(/\*Date and Time:\*\s*\n?([^-]+)\s*-\s*([^(]+)\s*\(([^)]+)\)/);
+    if (dateTimeMatch) {
+      const dateStr = dateTimeMatch[1].trim(); // "Tue, Aug 5th"
+      meetingTime = dateTimeMatch[2].trim();   // "12:30 PM PDT"
+      duration = dateTimeMatch[3].trim();      // "18 mins"
+      
+      console.log('Date parts:', { dateStr, meetingTime, duration });
+      
+      // Parse the date
+      try {
+        // Remove ordinal suffixes (st, nd, rd, th)
+        const cleanDateStr = dateStr.replace(/(\d+)(st|nd|rd|th)/, '$1');
+        const year = new Date().getFullYear();
+        const fullDateStr = `${cleanDateStr}, ${year} ${meetingTime}`;
+        const parsedDate = new Date(fullDateStr);
         
-        // Extract duration
-        const durationMatch = dateInfo.match(/\((\d+\s*mins?)\)/);
-        if (durationMatch) {
-          duration = durationMatch[1];
+        if (!isNaN(parsedDate.getTime())) {
+          meetingDate = parsedDate;
         }
-        
-        // Extract time
-        const timeMatch = dateInfo.match(/([\d:]+\s*[AP]M)/);
-        if (timeMatch) {
-          meetingTime = timeMatch[1];
-        }
-        
-        // Try to parse the date
-        const datePartMatch = dateInfo.match(/([A-Z][a-z]{2}, [A-Z][a-z]{2} \d+(?:st|nd|rd|th)?)/);
-        if (datePartMatch) {
-          const datePart = datePartMatch[1].replace(/(\d+)(st|nd|rd|th)/, '$1');
-          const year = new Date().getFullYear();
-          try {
-            const parsedDate = new Date(`${datePart}, ${year} ${meetingTime}`);
-            if (!isNaN(parsedDate.getTime())) {
-              meetingDate = parsedDate;
-            }
-          } catch (e) {
-            console.log('Date parsing failed:', e);
-          }
-        }
-        break;
+      } catch (e) {
+        console.log('Could not parse date:', e);
       }
     }
     
     // Extract participants
     let participants = [];
-    const participantsPatterns = [
-      /\*Participants:\*\s*\n?([^*\n]+)/,
-      /Participants:\s*([^*\n]+)/
-    ];
-    
-    for (const pattern of participantsPatterns) {
-      const match = text.match(pattern);
-      if (match) {
-        const participantsList = match[1].trim();
+    const participantsMatch = text.match(/\*Participants:\*\s*\n?([^\n*]+)/);
+    if (participantsMatch) {
+      const participantsList = participantsMatch[1].trim();
+      // Handle truncated participants list (ends with "...")
+      if (participantsList) {
         participants = participantsList
-          .split(/[,;]/)
+          .split(',')
           .map(p => p.trim())
-          .filter(p => p && p.length > 2);
-        break;
+          .filter(p => p && !p.includes('...'));
       }
+      console.log('Found participants:', participants.length);
     }
     
-    // Extract gist/summary
+    // Extract gist
     let gist = '';
-    const gistPatterns = [
-      /\*Gist:\*\s*\n?([^*\n]+)/,
-      /Gist:\s*([^*\n]+)/,
-      /Summary:\s*([^*\n]+)/
-    ];
-    
-    for (const pattern of gistPatterns) {
-      const match = text.match(pattern);
-      if (match) {
-        gist = match[1].trim();
-        break;
-      }
+    const gistMatch = text.match(/\*Gist:\*\s*\n?([^\n*]+)/);
+    if (gistMatch) {
+      gist = gistMatch[1].trim();
     }
     
-    // Extract overview and action items
+    // Extract overview
     let overview = '';
     let actionItems = [];
-    
-    const overviewMatch = text.match(/\*Overview:\*\s*\n?([\s\S]*?)(?=\*|$)/);
+    const overviewMatch = text.match(/\*Overview:\*\s*\n?([\s\S]*?)(?:\*|$)/);
     if (overviewMatch) {
-      const overviewText = overviewMatch[1].trim();
-      overview = overviewText;
+      overview = overviewMatch[1].trim();
       
       // Extract bullet points as action items
-      const bullets = overviewText.split(/\n/).filter(line => {
-        const trimmed = line.trim();
-        return trimmed.startsWith('-') || trimmed.startsWith('•') || trimmed.startsWith('*');
-      });
-      
-      actionItems = bullets.map(item => 
-        item.replace(/^[-•*]\s*/, '').trim()
-      ).filter(item => item.length > 10);
+      const lines = overview.split('\n');
+      for (const line of lines) {
+        const cleaned = line.trim();
+        if (cleaned.startsWith('-') || cleaned.startsWith('•')) {
+          const item = cleaned.replace(/^[-•]\s*/, '').trim();
+          if (item.length > 10) {
+            actionItems.push(item);
+          }
+        }
+      }
     }
     
-    // If no overview but we have gist, use that
+    // Use gist as overview if no overview found
     if (!overview && gist) {
       overview = gist;
     }
     
-    // If still no overview, use first part of text
-    if (!overview && text.length > 100) {
-      overview = text.substring(0, 200) + '...';
+    // If still no overview, use portion of the text
+    if (!overview) {
+      // Try to extract meaningful content after participants
+      const afterParticipants = text.split('*Participants:*')[1];
+      if (afterParticipants) {
+        const contentMatch = afterParticipants.match(/[^*\n]+\s+([^*]+)/);
+        if (contentMatch) {
+          overview = contentMatch[1].substring(0, 200) + '...';
+        }
+      }
     }
     
-    return {
+    const meeting = {
       id: message.ts || `slack-${Date.now()}`,
       title: title,
       date: meetingDate.toISOString(),
       dateFormatted: meetingDate.toLocaleDateString(),
       timeFormatted: meetingTime || meetingDate.toLocaleTimeString(),
-      duration: duration,
+      duration: duration || 'N/A',
       attendees: participants.length,
       participants: participants,
-      actionItems: actionItems.slice(0, 10), // Limit to 10 items
-      overview: overview.substring(0, 500),
+      actionItems: actionItems,
+      overview: overview || 'No overview available',
       gist: gist,
       source: 'slack-fireflies',
       meetingUrl: meetingUrl,
       firefliesUrl: meetingUrl,
-      slackTimestamp: message.ts,
-      rawText: text.substring(0, 200) // For debugging
+      slackTimestamp: message.ts
     };
+    
+    console.log('Created meeting object:', { 
+      title: meeting.title, 
+      date: meeting.dateFormatted,
+      attendees: meeting.attendees 
+    });
+    
+    return meeting;
   }
 
   async testConnection() {
