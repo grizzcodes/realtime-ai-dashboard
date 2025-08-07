@@ -152,6 +152,67 @@ app.get('/api/notion/tasks', async (req, res) => {
   }
 });
 
+// CREATE Notion task endpoint (NEW)
+app.post('/api/notion/tasks', async (req, res) => {
+  try {
+    const { title, assignee, priority, dueDate, source, project, meetingUrl, meetingDate } = req.body;
+    
+    console.log('📝 Creating Notion task:', { title, assignee, priority, dueDate });
+    
+    // Check if Notion service is available
+    if (!integrationService.notionService) {
+      console.error('❌ Notion service not initialized');
+      return res.status(503).json({
+        success: false,
+        error: 'Notion service not available'
+      });
+    }
+    
+    // Create the task in Notion
+    const result = await integrationService.createNotionTask({
+      title: title || 'Untitled Task',
+      assignee: assignee || '',
+      priority: priority || 'Medium',
+      dueDate: dueDate || null,
+      status: 'Todo',
+      source: source || 'DGenz Hub',
+      project: project || '',
+      meetingUrl: meetingUrl || '',
+      meetingDate: meetingDate || '',
+      createdAt: new Date().toISOString()
+    });
+    
+    if (result && result.success) {
+      console.log('✅ Task created successfully in Notion');
+      
+      // Emit WebSocket event for real-time update
+      io.emit('taskUpdate', {
+        type: 'task_created',
+        task: result.task,
+        timestamp: new Date().toISOString()
+      });
+      
+      res.json({
+        success: true,
+        task: result.task,
+        message: 'Task created successfully'
+      });
+    } else {
+      console.error('❌ Failed to create task:', result?.error || 'Unknown error');
+      res.status(400).json({
+        success: false,
+        error: result?.error || 'Failed to create task'
+      });
+    }
+  } catch (error) {
+    console.error('❌ Error creating Notion task:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Internal server error'
+    });
+  }
+});
+
 // Get AI tasks from Supabase
 app.get('/api/tasks', async (req, res) => {
   try {
