@@ -272,6 +272,37 @@ class IntegrationService {
     }
   }
 
+  // CREATE NOTION TASK METHOD (NEW)
+  async createNotionTask(taskData) {
+    try {
+      console.log('📝 Creating task in Notion:', taskData.title);
+      
+      // Use the NotionService to create the task
+      const result = await this.notionService.createTask(taskData);
+      
+      if (result.success) {
+        console.log('✅ Task created successfully in Notion');
+        return {
+          success: true,
+          task: result.task,
+          message: 'Task created successfully'
+        };
+      } else {
+        console.error('❌ Failed to create task in Notion:', result.error);
+        return {
+          success: false,
+          error: result.error || 'Failed to create task in Notion'
+        };
+      }
+    } catch (error) {
+      console.error('❌ Error creating Notion task:', error);
+      return {
+        success: false,
+        error: error.message || 'Failed to create task'
+      };
+    }
+  }
+
   async getFilteredTasks(person, status) {
     try {
       const result = await this.notionService.getFilteredTasks(person, status);
