@@ -34,7 +34,7 @@ class NotionService {
     }
   }
 
-  // CREATE TASK METHOD (NEW)
+  // CREATE TASK METHOD (FIXED to handle status dynamically)
   async createTask(taskData) {
     if (!this.notion) {
       return { success: false, error: 'Notion not configured' };
@@ -47,6 +47,29 @@ class NotionService {
     try {
       console.log(`📝 Creating task in Notion database: ${this.databaseId}`);
       
+      // First, get the database schema to find valid status options
+      const dbInfo = await this.notion.databases.retrieve({
+        database_id: this.databaseId
+      });
+      
+      // Get available status options
+      let defaultStatus = null;
+      const statusProperty = dbInfo.properties['Status'];
+      if (statusProperty && statusProperty.type === 'status') {
+        const statusOptions = statusProperty.status.options;
+        console.log('Available status options:', statusOptions.map(opt => opt.name));
+        
+        // Try to find a suitable default status
+        defaultStatus = statusOptions.find(opt => 
+          opt.name.toLowerCase().includes('not') || 
+          opt.name.toLowerCase().includes('todo') ||
+          opt.name.toLowerCase().includes('new') ||
+          opt.name.toLowerCase().includes('backlog')
+        )?.name || statusOptions[0]?.name;
+        
+        console.log(`Using status: ${defaultStatus}`);
+      }
+      
       // Build properties object based on your Notion database schema
       const properties = {
         'Task name': {
@@ -57,21 +80,22 @@ class NotionService {
               }
             }
           ]
-        },
-        'Status': {
-          status: {
-            name: taskData.status || 'Not Done Yet'
-          }
         }
       };
 
+      // Only add status if we found a valid option
+      if (defaultStatus) {
+        properties['Status'] = {
+          status: {
+            name: defaultStatus
+          }
+        };
+      }
+
       // Add optional properties if they exist
       if (taskData.assignee) {
-        // Note: This assumes you have a person field called "Assigned"
-        // You might need to adjust based on your actual Notion setup
-        properties['Assigned'] = {
-          people: [] // Will need actual Notion user IDs for this to work
-        };
+        // Note: This would need actual Notion user IDs to work properly
+        // For now, we'll skip it or you could add a text field
       }
 
       if (taskData.priority) {
@@ -124,7 +148,7 @@ class NotionService {
         task: {
           id: response.id,
           title: taskData.title,
-          status: taskData.status || 'Not Done Yet',
+          status: defaultStatus || 'Created',
           priority: taskData.priority,
           dueDate: taskData.dueDate,
           project: taskData.project,
