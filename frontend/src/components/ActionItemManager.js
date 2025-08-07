@@ -1,5 +1,5 @@
 // frontend/src/components/ActionItemManager.js
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Check, X, Edit2, Send, Calendar, User, AlertCircle, ChevronRight, RefreshCw, CheckSquare, Square } from 'lucide-react';
 import './ActionItemManager.css';
 
@@ -13,14 +13,14 @@ const ActionItemManager = ({ meetings = [] }) => {
   const [showBulkActions, setShowBulkActions] = useState(false);
   const [expandedMeetings, setExpandedMeetings] = useState({});
 
-  // Team members for assignment
-  const teamMembers = ['Unassigned', 'Alec', 'Leo', 'Steph', 'Pablo', 'Anthony', 'Dany', 'Mathieu'];
+  // Team members for assignment - use useMemo to prevent recreating
+  const teamMembers = useMemo(() => ['Unassigned', 'Alec', 'Leo', 'Steph', 'Pablo', 'Anthony', 'Dany', 'Mathieu'], []);
   
   // Priority levels
-  const priorities = ['Low', 'Medium', 'High', 'Urgent'];
+  const priorities = useMemo(() => ['Low', 'Medium', 'High', 'Urgent'], []);
   
-  // Project/Client tags
-  const projects = ['General', 'DGenz', 'One Dot', 'Animation Studio', 'TSC', 'Haiti Twins', 'GUS'];
+  // Project/Client tags - use useMemo to prevent recreating
+  const projects = useMemo(() => ['General', 'DGenz', 'One Dot', 'Animation Studio', 'TSC', 'Haiti Twins', 'GUS'], []);
 
   const parseActionItem = useCallback((item, meeting) => {
     // Handle different data structures - could be string or object
@@ -110,7 +110,7 @@ const ActionItemManager = ({ meetings = [] }) => {
       inNotion: inNotion,
       edited: false
     };
-  }, [notionTasks]);
+  }, [notionTasks, teamMembers, projects]);
 
   const parseAllActionItems = useCallback(() => {
     if (!meetings || !Array.isArray(meetings) || meetings.length === 0) {
