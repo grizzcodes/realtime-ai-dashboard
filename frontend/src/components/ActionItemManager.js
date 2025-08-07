@@ -1,6 +1,6 @@
 // frontend/src/components/ActionItemManager.js
-import React, { useState, useEffect } from 'react';
-import { Check, X, Edit2, Send, Calendar, User, AlertCircle, ChevronRight, Save, RefreshCw, CheckSquare, Square } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Check, X, Edit2, Send, Calendar, User, AlertCircle, ChevronRight, RefreshCw, CheckSquare, Square } from 'lucide-react';
 import './ActionItemManager.css';
 
 const ActionItemManager = ({ meetings = [] }) => {
@@ -22,44 +22,19 @@ const ActionItemManager = ({ meetings = [] }) => {
   // Project/Client tags
   const projects = ['General', 'DGenz', 'One Dot', 'Animation Studio', 'TSC', 'Haiti Twins', 'GUS'];
 
-  useEffect(() => {
-    if (meetings && meetings.length > 0) {
-      parseAllActionItems();
-    }
-    loadNotionTasks();
-  }, [meetings]);
-
-  const parseAllActionItems = () => {
-    if (!meetings || !Array.isArray(meetings) || meetings.length === 0) {
-      setActionItems([]);
-      return;
+  const parseActionItem = useCallback((item, meeting) => {
+    // Handle different data structures - could be string or object
+    let text = '';
+    if (typeof item === 'string') {
+      text = item;
+    } else if (item && typeof item === 'object') {
+      text = item.task || item.description || item.text || item.content || '';
     }
     
-    const allItems = [];
-    
-    meetings.forEach(meeting => {
-      if (meeting && meeting.actionItems && Array.isArray(meeting.actionItems)) {
-        meeting.actionItems.forEach((item, index) => {
-          if (item) {
-            const parsedItem = parseActionItem(item, meeting);
-            allItems.push({
-              ...parsedItem,
-              id: `${meeting.id}-${index}`,
-              meetingId: meeting.id,
-              meetingTitle: meeting.title || 'Untitled Meeting',
-              meetingDate: meeting.date,
-              meetingUrl: meeting.firefliesUrl || meeting.meetingUrl || '#'
-            });
-          }
-        });
-      }
-    });
-    
-    setActionItems(allItems);
-  };
-
-  const parseActionItem = (item, meeting) => {
-    const text = typeof item === 'string' ? item : item.task || item.description || '';
+    // If text is still empty, try to convert to string
+    if (!text && item) {
+      text = String(item);
+    }
     
     // Smart parsing for assignee
     let assignee = 'Unassigned';
@@ -113,7 +88,7 @@ const ActionItemManager = ({ meetings = [] }) => {
     // Detect project/client
     let project = 'General';
     projects.slice(1).forEach(proj => {
-      if (meeting.title.includes(proj) || text.includes(proj)) {
+      if ((meeting.title && meeting.title.includes(proj)) || text.includes(proj)) {
         project = proj;
       }
     });
@@ -135,7 +110,52 @@ const ActionItemManager = ({ meetings = [] }) => {
       inNotion: inNotion,
       edited: false
     };
-  };
+  }, [notionTasks]);
+
+  const parseAllActionItems = useCallback(() => {
+    if (!meetings || !Array.isArray(meetings) || meetings.length === 0) {
+      setActionItems([]);
+      // Auto-expand first meeting if there are meetings
+      setExpandedMeetings({});
+      return;
+    }
+    
+    const allItems = [];
+    const initialExpanded = {};
+    
+    meetings.forEach((meeting, meetingIndex) => {
+      // Auto-expand first meeting
+      if (meetingIndex === 0 && meeting.id) {
+        initialExpanded[meeting.id] = true;
+      }
+      
+      if (meeting && meeting.actionItems && Array.isArray(meeting.actionItems)) {
+        meeting.actionItems.forEach((item, index) => {
+          if (item) {
+            const parsedItem = parseActionItem(item, meeting);
+            allItems.push({
+              ...parsedItem,
+              id: `${meeting.id}-${index}`,
+              meetingId: meeting.id,
+              meetingTitle: meeting.title || 'Untitled Meeting',
+              meetingDate: meeting.date,
+              meetingUrl: meeting.firefliesUrl || meeting.meetingUrl || '#'
+            });
+          }
+        });
+      }
+    });
+    
+    setActionItems(allItems);
+    setExpandedMeetings(initialExpanded);
+  }, [meetings, parseActionItem]);
+
+  useEffect(() => {
+    if (meetings && meetings.length > 0) {
+      parseAllActionItems();
+    }
+    loadNotionTasks();
+  }, [meetings, parseAllActionItems]);
 
   const loadNotionTasks = async () => {
     try {
@@ -308,16 +328,6 @@ const ActionItemManager = ({ meetings = [] }) => {
     return groups;
   }, {});
 
-  const getPriorityColor = (priority) => {
-    switch(priority) {
-      case 'Urgent': return 'priority-urgent';
-      case 'High': return 'priority-high';
-      case 'Medium': return 'priority-medium';
-      case 'Low': return 'priority-low';
-      default: return 'priority-medium';
-    }
-  };
-
   const getPriorityBadgeColor = (priority) => {
     switch(priority) {
       case 'Urgent': return 'badge-urgent';
@@ -327,6 +337,10 @@ const ActionItemManager = ({ meetings = [] }) => {
       default: return 'badge-medium';
     }
   };
+
+  // Debug log to see what data we're getting
+  console.log('Meetings received:', meetings);
+  console.log('Action items parsed:', actionItems);
 
   return (
     <div className="action-manager-container">
@@ -397,6 +411,12 @@ const ActionItemManager = ({ meetings = [] }) => {
           <AlertCircle size={48} />
           <h3>No Action Items Found</h3>
           <p>Your meetings don't contain any action items yet.</p>
+          <button
+            onClick={() => window.location.reload()}
+            className="btn-primary mt-4"
+          >
+            Reload Page
+          </button>
         </div>
       )}
 
