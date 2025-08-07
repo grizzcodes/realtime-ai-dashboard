@@ -34,7 +34,7 @@ class NotionService {
     }
   }
 
-  // CREATE TASK METHOD (FIXED to handle status dynamically)
+  // CREATE TASK METHOD (UPDATED to prioritize "To Do")
   async createTask(taskData) {
     if (!this.notion) {
       return { success: false, error: 'Notion not configured' };
@@ -59,13 +59,31 @@ class NotionService {
         const statusOptions = statusProperty.status.options;
         console.log('Available status options:', statusOptions.map(opt => opt.name));
         
-        // Try to find a suitable default status
+        // PRIORITIZE "To Do" or similar statuses
         defaultStatus = statusOptions.find(opt => 
-          opt.name.toLowerCase().includes('not') || 
-          opt.name.toLowerCase().includes('todo') ||
-          opt.name.toLowerCase().includes('new') ||
-          opt.name.toLowerCase().includes('backlog')
-        )?.name || statusOptions[0]?.name;
+          opt.name.toLowerCase() === 'to do' ||
+          opt.name.toLowerCase() === 'todo' ||
+          opt.name.toLowerCase() === 'to-do'
+        )?.name;
+        
+        // If no "To Do" found, try other suitable options
+        if (!defaultStatus) {
+          defaultStatus = statusOptions.find(opt => 
+            opt.name.toLowerCase().includes('not') || 
+            opt.name.toLowerCase().includes('new') ||
+            opt.name.toLowerCase().includes('backlog') ||
+            opt.name.toLowerCase().includes('pending')
+          )?.name;
+        }
+        
+        // Avoid "Daily Task" unless it's the only option
+        if (!defaultStatus) {
+          defaultStatus = statusOptions.find(opt => 
+            !opt.name.toLowerCase().includes('daily') &&
+            !opt.name.toLowerCase().includes('done') &&
+            !opt.name.toLowerCase().includes('complete')
+          )?.name || statusOptions[0]?.name;
+        }
         
         console.log(`Using status: ${defaultStatus}`);
       }
