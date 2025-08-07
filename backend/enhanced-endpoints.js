@@ -152,7 +152,7 @@ app.get('/api/notion/tasks', async (req, res) => {
   }
 });
 
-// CREATE Notion task endpoint (NEW)
+// CREATE Notion task endpoint (FIXED)
 app.post('/api/notion/tasks', async (req, res) => {
   try {
     const { title, assignee, priority, dueDate, source, project, meetingUrl, meetingDate } = req.body;
@@ -168,13 +168,13 @@ app.post('/api/notion/tasks', async (req, res) => {
       });
     }
     
-    // Create the task in Notion
+    // Create the task in Notion with correct status
     const result = await integrationService.createNotionTask({
       title: title || 'Untitled Task',
       assignee: assignee || '',
       priority: priority || 'Medium',
       dueDate: dueDate || null,
-      status: 'Todo',
+      status: 'Not Done Yet', // FIXED: Changed from 'Todo' to 'Not Done Yet'
       source: source || 'DGenz Hub',
       project: project || '',
       meetingUrl: meetingUrl || '',
