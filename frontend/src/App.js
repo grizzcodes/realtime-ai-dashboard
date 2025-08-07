@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import io from 'socket.io-client';
 import { Send, MessageCircle, Users, Clock, RotateCcw, ChevronDown, Calendar } from 'lucide-react';
 import MagicInbox from './components/MagicInbox';
@@ -8,7 +8,6 @@ import ActionItemManager from './components/ActionItemManager';
 import './App.css';
 
 const App = () => {
-  const [tasks, setTasks] = useState([]);
   const [notionTasks, setNotionTasks] = useState([]);
   const [filteredNotionTasks, setFilteredNotionTasks] = useState([]);
   const [emails, setEmails] = useState([]);
@@ -31,55 +30,7 @@ const App = () => {
 
   const teamMembers = ['All', 'Alec', 'Leo', 'Steph', 'Pablo', 'Alexa', 'Anthony', 'Dany', 'Mathieu'];
 
-  useEffect(() => {
-    const socket = io('http://localhost:3001');
-    socket.on('connect', () => setIsConnected(true));
-    socket.on('disconnect', () => setIsConnected(false));
-    
-    loadTasks();
-    loadNotionTasks();
-    loadEmails();
-    loadMeetings();
-    loadCalendarEvents();
-    loadApiStatus();
-    
-    const savedDarkMode = localStorage.getItem('darkMode') === 'true';
-    setDarkMode(savedDarkMode);
-    
-    return () => socket.close();
-  }, []);
-
-  useEffect(() => {
-    if (darkMode) {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
-    localStorage.setItem('darkMode', darkMode);
-  }, [darkMode]);
-
-  useEffect(() => {
-    // Filter Notion tasks when selection changes
-    if (selectedPerson === 'All') {
-      setFilteredNotionTasks(notionTasks);
-    } else {
-      setFilteredNotionTasks(notionTasks.filter(task => 
-        task.assignedTo && task.assignedTo.includes(selectedPerson)
-      ));
-    }
-  }, [notionTasks, selectedPerson]);
-
-  const loadTasks = async () => {
-    try {
-      const response = await fetch('http://localhost:3001/api/tasks');
-      const data = await response.json();
-      setTasks(data.tasks || []);
-    } catch (error) {
-      console.error('Failed to load tasks:', error);
-    }
-  };
-
-  const loadNotionTasks = async () => {
+  const loadNotionTasks = useCallback(async () => {
     setIsLoadingNotion(true);
     try {
       const response = await fetch('http://localhost:3001/api/notion/tasks');
@@ -100,7 +51,44 @@ const App = () => {
     } finally {
       setIsLoadingNotion(false);
     }
-  };
+  }, [teamMembers]);
+
+  useEffect(() => {
+    const socket = io('http://localhost:3001');
+    socket.on('connect', () => setIsConnected(true));
+    socket.on('disconnect', () => setIsConnected(false));
+    
+    loadNotionTasks();
+    loadEmails();
+    loadMeetings();
+    loadCalendarEvents();
+    loadApiStatus();
+    
+    const savedDarkMode = localStorage.getItem('darkMode') === 'true';
+    setDarkMode(savedDarkMode);
+    
+    return () => socket.close();
+  }, [loadNotionTasks]);
+
+  useEffect(() => {
+    if (darkMode) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+    localStorage.setItem('darkMode', darkMode);
+  }, [darkMode]);
+
+  useEffect(() => {
+    // Filter Notion tasks when selection changes
+    if (selectedPerson === 'All') {
+      setFilteredNotionTasks(notionTasks);
+    } else {
+      setFilteredNotionTasks(notionTasks.filter(task => 
+        task.assignedTo && task.assignedTo.includes(selectedPerson)
+      ));
+    }
+  }, [notionTasks, selectedPerson]);
 
   const loadEmails = async () => {
     setIsLoadingEmails(true);
@@ -294,7 +282,6 @@ const App = () => {
       });
       const result = await response.json();
       console.log('AI Test Result:', result);
-      loadTasks();
       loadNotionTasks();
     } catch (error) {
       console.error('AI test failed:', error);
@@ -309,7 +296,6 @@ const App = () => {
       });
       const result = await response.json();
       if (result.success) {
-        loadTasks();
         loadNotionTasks();
       }
     } catch (error) {
