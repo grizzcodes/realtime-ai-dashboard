@@ -223,19 +223,33 @@ const App = () => {
     }
   };
 
-  // SIMPLE Push action item to Notion
+  // SIMPLE Push action item to Notion (UPDATED to handle assignee from action item)
   const pushActionItemToNotion = async (actionItem, meeting, index) => {
+    // Extract the task text and assignee
+    let taskText = '';
+    let assignee = 'Team';
+    
+    if (typeof actionItem === 'object' && actionItem.task) {
+      // New format with assignee
+      taskText = actionItem.task;
+      assignee = actionItem.assignee || 'Team';
+    } else {
+      // Old format (just text)
+      taskText = actionItem;
+    }
+    
     // Quick edit popup
-    const editedText = prompt("Edit task before sending to Notion:", actionItem);
+    const editedText = prompt("Edit task before sending to Notion:", taskText);
     if (!editedText) return;
     
-    // Auto-detect assignee from text
-    let assignee = "Team";
-    teamMembers.slice(1).forEach(member => {
-      if (editedText.toLowerCase().includes(member.toLowerCase())) {
-        assignee = member;
-      }
-    });
+    // Keep the assignee from the action item or auto-detect from edited text
+    if (assignee === 'Team') {
+      teamMembers.slice(1).forEach(member => {
+        if (editedText.toLowerCase().includes(member.toLowerCase())) {
+          assignee = member;
+        }
+      });
+    }
     
     // Auto-detect priority
     let priority = "Medium";
@@ -637,7 +651,7 @@ const App = () => {
                 )}
               </div>
 
-              {/* Fireflies Meetings Box WITH SIMPLE PUSH BUTTONS */}
+              {/* Fireflies Meetings Box WITH PROPER ACTION ITEMS */}
               <div className="card-glass p-6 animate-fade-in">
                 <div className="flex justify-between items-center mb-4">
                   <h2 className="text-xl font-bold text-glow">🎙️ Meetings ({meetings.length})</h2>
@@ -683,32 +697,41 @@ const App = () => {
                           <div className="mb-3">
                             <h5 className="text-xs font-medium opacity-80 mb-1">Action Items:</h5>
                             <div className="space-y-1">
-                              {meeting.actionItems.slice(0, 3).map((item, index) => (
-                                <div key={index} className="flex items-center gap-2">
-                                  <p className="text-xs opacity-70 line-clamp-1 flex-1">
-                                    • {typeof item === 'string' ? item : item.task || item}
-                                  </p>
-                                  <button
-                                    onClick={() => pushActionItemToNotion(
-                                      typeof item === 'string' ? item : item.task || item,
-                                      meeting,
-                                      index
-                                    )}
-                                    disabled={pushingToNotion[`${meeting.id}-${index}`]}
-                                    className="btn-glass px-2 py-0.5 text-xs rounded flex items-center gap-1"
-                                    title="Push to Notion"
-                                  >
-                                    {pushingToNotion[`${meeting.id}-${index}`] ? (
-                                      <div className="loading-spinner border-white w-3 h-3"></div>
-                                    ) : (
-                                      <>
-                                        <Plus size={10} />
-                                        Notion
-                                      </>
-                                    )}
-                                  </button>
-                                </div>
-                              ))}
+                              {meeting.actionItems.slice(0, 3).map((item, index) => {
+                                // Handle both object format (with assignee) and string format
+                                const taskText = typeof item === 'object' ? item.task : item;
+                                const assignee = typeof item === 'object' ? item.assignee : null;
+                                
+                                return (
+                                  <div key={index} className="flex items-center gap-2">
+                                    <div className="flex-1">
+                                      <p className="text-xs opacity-70 line-clamp-1">
+                                        • {taskText}
+                                      </p>
+                                      {assignee && (
+                                        <span className="text-xs opacity-50 ml-3">
+                                          👤 {assignee}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <button
+                                      onClick={() => pushActionItemToNotion(item, meeting, index)}
+                                      disabled={pushingToNotion[`${meeting.id}-${index}`]}
+                                      className="btn-glass px-2 py-0.5 text-xs rounded flex items-center gap-1"
+                                      title="Push to Notion"
+                                    >
+                                      {pushingToNotion[`${meeting.id}-${index}`] ? (
+                                        <div className="loading-spinner border-white w-3 h-3"></div>
+                                      ) : (
+                                        <>
+                                          <Plus size={10} />
+                                          Notion
+                                        </>
+                                      )}
+                                    </button>
+                                  </div>
+                                );
+                              })}
                               {meeting.actionItems.length > 3 && (
                                 <div className="text-xs opacity-50">
                                   +{meeting.actionItems.length - 3} more...
