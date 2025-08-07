@@ -34,6 +34,112 @@ class NotionService {
     }
   }
 
+  // CREATE TASK METHOD (NEW)
+  async createTask(taskData) {
+    if (!this.notion) {
+      return { success: false, error: 'Notion not configured' };
+    }
+
+    if (!this.databaseId) {
+      return { success: false, error: 'Database ID not configured' };
+    }
+
+    try {
+      console.log(`📝 Creating task in Notion database: ${this.databaseId}`);
+      
+      // Build properties object based on your Notion database schema
+      const properties = {
+        'Task name': {
+          title: [
+            {
+              text: {
+                content: taskData.title || 'Untitled Task'
+              }
+            }
+          ]
+        },
+        'Status': {
+          status: {
+            name: taskData.status || 'Not Done Yet'
+          }
+        }
+      };
+
+      // Add optional properties if they exist
+      if (taskData.assignee) {
+        // Note: This assumes you have a person field called "Assigned"
+        // You might need to adjust based on your actual Notion setup
+        properties['Assigned'] = {
+          people: [] // Will need actual Notion user IDs for this to work
+        };
+      }
+
+      if (taskData.priority) {
+        properties['Priority'] = {
+          select: {
+            name: taskData.priority
+          }
+        };
+      }
+
+      if (taskData.dueDate) {
+        properties['Due'] = {
+          date: {
+            start: taskData.dueDate
+          }
+        };
+      }
+
+      if (taskData.project) {
+        properties['Brand/Projects'] = {
+          multi_select: [
+            {
+              name: taskData.project
+            }
+          ]
+        };
+      }
+
+      // Add source/notes if you have a field for it
+      if (taskData.source) {
+        properties['Type'] = {
+          select: {
+            name: 'Meeting Action'
+          }
+        };
+      }
+
+      // Create the page in Notion
+      const response = await this.notion.pages.create({
+        parent: {
+          database_id: this.databaseId
+        },
+        properties: properties
+      });
+
+      console.log(`✅ Task created successfully in Notion: ${response.id}`);
+
+      return {
+        success: true,
+        task: {
+          id: response.id,
+          title: taskData.title,
+          status: taskData.status || 'Not Done Yet',
+          priority: taskData.priority,
+          dueDate: taskData.dueDate,
+          project: taskData.project,
+          notionUrl: response.url
+        }
+      };
+    } catch (error) {
+      console.error('❌ Failed to create Notion task:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
   async getFilteredTasks(person, status) {
     try {
       const result = await this.getTasks();
@@ -416,7 +522,7 @@ class NotionService {
       }
       
       // Remove any extra quotes or formatting
-      cleanPageId = cleanPageId.replace(/['\"]/g, '');
+      cleanPageId = cleanPageId.replace(/['\\"]/g, '');
       
       console.log(`📝 Updating Notion task ${cleanPageId} to status: ${status}`);
       
