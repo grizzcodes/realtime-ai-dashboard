@@ -1,10 +1,9 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import io from 'socket.io-client';
-import { Send, MessageCircle, Users, Clock, RotateCcw, ChevronDown, Calendar } from 'lucide-react';
+import { Send, MessageCircle, Users, Clock, RotateCcw, ChevronDown, Calendar, Plus } from 'lucide-react';
 import MagicInbox from './components/MagicInbox';
 import SupaDashboard from './components/SupaDashboard';
 import IntegrationStatusBar from './components/IntegrationStatusBar';
-import ActionItemManager from './components/ActionItemManager';
 import './App.css';
 
 const App = () => {
@@ -17,7 +16,7 @@ const App = () => {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [apiStatus, setApiStatus] = useState({});
   const [showIntegrations, setShowIntegrations] = useState(false);
-  const [darkMode, setDarkMode] = useState(false);
+  const [darkMode, setDarkMode] = useState(true); // DEFAULT TO DARK MODE
   const [chatMessages, setChatMessages] = useState([]);
   const [chatInput, setChatInput] = useState('');
   const [isAITyping, setIsAITyping] = useState(false);
@@ -27,6 +26,7 @@ const App = () => {
   const [isLoadingNotion, setIsLoadingNotion] = useState(false);
   const [isLoadingEmails, setIsLoadingEmails] = useState(false);
   const [isLoadingCalendar, setIsLoadingCalendar] = useState(false);
+  const [pushingToNotion, setPushingToNotion] = useState({});
 
   // Use useMemo to prevent recreating on every render
   const teamMembers = useMemo(() => ['All', 'Alec', 'Leo', 'Steph', 'Pablo', 'Alexa', 'Anthony', 'Dany', 'Mathieu'], []);
@@ -65,8 +65,9 @@ const App = () => {
     loadCalendarEvents();
     loadApiStatus();
     
-    const savedDarkMode = localStorage.getItem('darkMode') === 'true';
-    setDarkMode(savedDarkMode);
+    // Check for saved dark mode preference, default to true
+    const savedDarkMode = localStorage.getItem('darkMode');
+    setDarkMode(savedDarkMode !== 'false'); // Default to true unless explicitly set to false
     
     return () => socket.close();
   }, [loadNotionTasks]);
@@ -222,6 +223,74 @@ const App = () => {
     }
   };
 
+  // SIMPLE Push action item to Notion
+  const pushActionItemToNotion = async (actionItem, meeting, index) => {
+    // Quick edit popup
+    const editedText = prompt("Edit task before sending to Notion:", actionItem);
+    if (!editedText) return;
+    
+    // Auto-detect assignee from text
+    let assignee = "Team";
+    teamMembers.slice(1).forEach(member => {
+      if (editedText.toLowerCase().includes(member.toLowerCase())) {
+        assignee = member;
+      }
+    });
+    
+    // Auto-detect priority
+    let priority = "Medium";
+    if (editedText.match(/urgent|asap|immediately|critical/i)) {
+      priority = "Urgent";
+    } else if (editedText.match(/important|priority|soon/i)) {
+      priority = "High";
+    } else if (editedText.match(/later|eventually|consider/i)) {
+      priority = "Low";
+    }
+    
+    // Set a due date (default to 1 week from now)
+    const dueDate = new Date();
+    if (editedText.match(/today/i)) {
+      // Keep today
+    } else if (editedText.match(/tomorrow/i)) {
+      dueDate.setDate(dueDate.getDate() + 1);
+    } else if (editedText.match(/this week/i)) {
+      dueDate.setDate(dueDate.getDate() + 7);
+    } else {
+      dueDate.setDate(dueDate.getDate() + 7); // Default 1 week
+    }
+    
+    // Set loading state
+    setPushingToNotion(prev => ({ ...prev, [`${meeting.id}-${index}`]: true }));
+    
+    try {
+      const response = await fetch('http://localhost:3001/api/notion/tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: editedText,
+          assignee: assignee,
+          priority: priority,
+          dueDate: dueDate.toISOString().split('T')[0],
+          source: `Fireflies: ${meeting.title}`,
+          meetingUrl: meeting.firefliesUrl || meeting.meetingUrl || '#'
+        })
+      });
+      
+      if (response.ok) {
+        alert(`✅ Added to Notion!\n\nTask: ${editedText}\nAssigned to: ${assignee}\nPriority: ${priority}`);
+        // Reload Notion tasks to show the new one
+        loadNotionTasks();
+      } else {
+        alert('❌ Failed to add to Notion. Check your integration.');
+      }
+    } catch (error) {
+      console.error('Error pushing to Notion:', error);
+      alert('❌ Error connecting to Notion');
+    } finally {
+      setPushingToNotion(prev => ({ ...prev, [`${meeting.id}-${index}`]: false }));
+    }
+  };
+
   const sendChatMessage = async () => {
     if (!chatInput.trim()) return;
 
@@ -371,7 +440,7 @@ const App = () => {
         </div>
         
         <div className="flex gap-2 mt-4">
-          {['dashboard', 'action-items', 'magic-inbox', 'supa', 'integrations'].map(tab => (
+          {['dashboard', 'magic-inbox', 'supa', 'integrations'].map(tab => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -381,8 +450,7 @@ const App = () => {
                   : 'btn-glass'
               }`}
             >
-              {tab === 'action-items' ? '✅ Action Items' :
-               tab === 'magic-inbox' ? '✨ Magic Inbox' : 
+              {tab === 'magic-inbox' ? '✨ Magic Inbox' : 
                tab === 'supa' ? '🗄️ SUPA' :
                tab.charAt(0).toUpperCase() + tab.slice(1)}
             </button>
@@ -569,7 +637,7 @@ const App = () => {
                 )}
               </div>
 
-              {/* Fireflies Meetings Box - SIMPLIFIED WITHOUT PUSH BUTTONS */}
+              {/* Fireflies Meetings Box WITH SIMPLE PUSH BUTTONS */}
               <div className="card-glass p-6 animate-fade-in">
                 <div className="flex justify-between items-center mb-4">
                   <h2 className="text-xl font-bold text-glow">🎙️ Meetings ({meetings.length})</h2>
@@ -616,9 +684,30 @@ const App = () => {
                             <h5 className="text-xs font-medium opacity-80 mb-1">Action Items:</h5>
                             <div className="space-y-1">
                               {meeting.actionItems.slice(0, 3).map((item, index) => (
-                                <p key={index} className="text-xs opacity-70 line-clamp-1">
-                                  • {typeof item === 'string' ? item : item.task || item}
-                                </p>
+                                <div key={index} className="flex items-center gap-2">
+                                  <p className="text-xs opacity-70 line-clamp-1 flex-1">
+                                    • {typeof item === 'string' ? item : item.task || item}
+                                  </p>
+                                  <button
+                                    onClick={() => pushActionItemToNotion(
+                                      typeof item === 'string' ? item : item.task || item,
+                                      meeting,
+                                      index
+                                    )}
+                                    disabled={pushingToNotion[`${meeting.id}-${index}`]}
+                                    className="btn-glass px-2 py-0.5 text-xs rounded flex items-center gap-1"
+                                    title="Push to Notion"
+                                  >
+                                    {pushingToNotion[`${meeting.id}-${index}`] ? (
+                                      <div className="loading-spinner border-white w-3 h-3"></div>
+                                    ) : (
+                                      <>
+                                        <Plus size={10} />
+                                        Notion
+                                      </>
+                                    )}
+                                  </button>
+                                </div>
                               ))}
                               {meeting.actionItems.length > 3 && (
                                 <div className="text-xs opacity-50">
@@ -692,8 +781,6 @@ const App = () => {
             </div>
           </div>
         )}
-
-        {activeTab === 'action-items' && <ActionItemManager meetings={meetings} />}
 
         {activeTab === 'magic-inbox' && <MagicInbox />}
 
