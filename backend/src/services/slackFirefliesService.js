@@ -294,23 +294,70 @@ class SlackFirefliesService {
     
     // Extract overview
     let overview = '';
-    let actionItems = [];
-    const overviewMatch = text.match(/\*Overview:\*\s*\n?([\s\S]*?)(?:\*|$)/);
+    const overviewMatch = text.match(/\*Overview:\*\s*\n?([\s\S]*?)(?:\*Action Items:\*|\*Notes:\*|$)/);
     if (overviewMatch) {
       overview = overviewMatch[1].trim();
+    }
+    
+    // UPDATED: Extract REAL action items with assignees
+    let actionItems = [];
+    
+    // Look for the Action Items section
+    const actionItemsMatch = text.match(/\*Action Items:\*\s*\n?([\s\S]*?)(?:\*[A-Z]|$)/);
+    if (actionItemsMatch) {
+      const actionItemsText = actionItemsMatch[1];
+      console.log('Found action items section:', actionItemsText.substring(0, 200));
       
-      // Extract bullet points as action items
-      const lines = overview.split('\n');
-      for (const line of lines) {
-        const cleaned = line.trim();
-        if (cleaned.startsWith('-') || cleaned.startsWith('•')) {
-          const item = cleaned.replace(/^[-•]\s*/, '').trim();
-          if (item.length > 10) {
-            actionItems.push(item);
+      // Pattern to match person names followed by their action items
+      // Pattern: **Name:** or *Name:*
+      const personPattern = /\*\*?([^:*]+):\*\*?\s*\n?([\s\S]*?)(?=\*\*?[^:*]+:\*\*?|$)/g;
+      let match;
+      
+      while ((match = personPattern.exec(actionItemsText)) !== null) {
+        const assignee = match[1].trim();
+        const tasksText = match[2].trim();
+        
+        // Split the tasks text into individual items
+        const tasks = tasksText
+          .split('\n')
+          .map(line => line.trim())
+          .filter(line => line.length > 5) // Filter out very short lines
+          .map(line => {
+            // Remove bullet points or dashes
+            return line.replace(/^[-•*]\s*/, '').trim();
+          })
+          .filter(task => task.length > 0);
+        
+        // Add each task with its assignee
+        tasks.forEach(task => {
+          actionItems.push({
+            task: task,
+            assignee: assignee,
+            isAssigned: true
+          });
+        });
+      }
+      
+      // If no structured action items found, try to extract from overview
+      if (actionItems.length === 0 && overview) {
+        const lines = overview.split('\n');
+        for (const line of lines) {
+          const cleaned = line.trim();
+          if (cleaned.startsWith('-') || cleaned.startsWith('•')) {
+            const item = cleaned.replace(/^[-•]\s*/, '').trim();
+            if (item.length > 10) {
+              actionItems.push({
+                task: item,
+                assignee: null,
+                isAssigned: false
+              });
+            }
           }
         }
       }
     }
+    
+    console.log(`Extracted ${actionItems.length} action items`);
     
     // Use gist as overview if no overview found
     if (!overview && gist) {
@@ -338,9 +385,10 @@ class SlackFirefliesService {
       duration: duration || 'N/A',
       attendees: participants.length,
       participants: participants,
-      actionItems: actionItems,
+      actionItems: actionItems, // Now includes assignee information
       overview: overview || 'No overview available',
       gist: gist,
+      summary: gist || overview || 'No summary available',
       source: 'slack-fireflies',
       meetingUrl: meetingUrl,
       firefliesUrl: meetingUrl,
@@ -350,7 +398,8 @@ class SlackFirefliesService {
     console.log('Created meeting object:', { 
       title: meeting.title, 
       date: meeting.dateFormatted,
-      attendees: meeting.attendees 
+      attendees: meeting.attendees,
+      actionItemsCount: meeting.actionItems.length
     });
     
     return meeting;
