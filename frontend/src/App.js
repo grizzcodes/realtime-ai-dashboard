@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import io from 'socket.io-client';
 import { Send, MessageCircle, Users, Clock, RotateCcw, ChevronDown, Calendar } from 'lucide-react';
 import MagicInbox from './components/MagicInbox';
@@ -28,7 +28,8 @@ const App = () => {
   const [isLoadingEmails, setIsLoadingEmails] = useState(false);
   const [isLoadingCalendar, setIsLoadingCalendar] = useState(false);
 
-  const teamMembers = ['All', 'Alec', 'Leo', 'Steph', 'Pablo', 'Alexa', 'Anthony', 'Dany', 'Mathieu'];
+  // Use useMemo to prevent recreating on every render
+  const teamMembers = useMemo(() => ['All', 'Alec', 'Leo', 'Steph', 'Pablo', 'Alexa', 'Anthony', 'Dany', 'Mathieu'], []);
 
   const loadNotionTasks = useCallback(async () => {
     setIsLoadingNotion(true);
