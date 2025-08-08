@@ -46,6 +46,7 @@ app.get('/health', (req, res) => {
 require('./server.js'); // Gmail routes
 require('./enhanced-endpoints.js'); // Additional endpoints
 require('./slack-fireflies-endpoints.js'); // Slack Fireflies endpoints
+require('./fireflies-webhook.js'); // Fireflies webhook endpoint
 
 // Fireflies routes (direct API)
 const firefliesRoutes = require('./src/routes/fireflies');
@@ -76,6 +77,7 @@ server.listen(PORT, () => {
   console.log('🔗 WebSocket server active');
   console.log('🎙️ Fireflies API integrated');
   console.log('💬 Slack Fireflies integration available');
+  console.log('🪝 Fireflies webhook ready at /api/webhook/fireflies');
 });
 
 // Graceful shutdown
