@@ -23,7 +23,7 @@ const TABLES = {
   people: {
     name: 'People',
     icon: '👥', 
-    columns: ['name', 'email', 'role', 'department', 'phone'],
+    columns: ['name', 'email', 'role', 'department', 'goals'],
     types: {}
   },
   outreach: {
