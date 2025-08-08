@@ -27,6 +27,7 @@ const App = () => {
   const [isLoadingEmails, setIsLoadingEmails] = useState(false);
   const [isLoadingCalendar, setIsLoadingCalendar] = useState(false);
   const [pushingToNotion, setPushingToNotion] = useState({});
+  const [availableTeamMembers, setAvailableTeamMembers] = useState(['All']);
 
   // Use useMemo to prevent recreating on every render
   const teamMembers = useMemo(() => ['All', 'Alec', 'Leo', 'Steph', 'Pablo', 'Alexa', 'Anthony', 'Dany', 'Mathieu'], []);
@@ -37,14 +38,24 @@ const App = () => {
       const response = await fetch('http://localhost:3001/api/notion/tasks');
       const data = await response.json();
       
-      // Filter out completed tasks and add mock data for demo
+      // Filter out completed tasks and properly map assignee
       const pendingTasks = (data.tasks || [])
         .filter(task => task.status !== 'completed' && task.status !== 'Done')
         .map(task => ({
           ...task,
-          assignedTo: task.assignedTo || teamMembers[Math.floor(Math.random() * (teamMembers.length - 1)) + 1],
-          dueDate: task.dueDate || new Date(Date.now() + Math.random() * 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+          // Use assignee from backend (not assignedTo) and DON'T override with random
+          assignedTo: task.assignee || task.assignedTo || 'Unassigned',
+          dueDate: task.dueDate || task.deadline || null
         }));
+      
+      // Extract unique assignees from actual Notion data
+      const uniqueAssignees = [...new Set(pendingTasks
+        .map(t => t.assignedTo)
+        .filter(a => a && a !== 'Unassigned')
+      )];
+      
+      // Update available team members with actual Notion users
+      setAvailableTeamMembers(['All', ...uniqueAssignees.sort()]);
       
       setNotionTasks(pendingTasks);
     } catch (error) {
@@ -52,7 +63,7 @@ const App = () => {
     } finally {
       setIsLoadingNotion(false);
     }
-  }, [teamMembers]);
+  }, []);
 
   useEffect(() => {
     const socket = io('http://localhost:3001');
@@ -522,7 +533,7 @@ const App = () => {
                 <div className="flex items-center gap-3">
                   <span className="text-2xl">📝</span>
                   
-                  {/* Person Dropdown */}
+                  {/* Person Dropdown - now shows actual team members from Notion */}
                   <div className="relative">
                     <button
                       onClick={() => setShowPersonDropdown(!showPersonDropdown)}
@@ -534,7 +545,7 @@ const App = () => {
                     
                     {showPersonDropdown && (
                       <div className="absolute top-full left-0 mt-1 w-32 glass rounded-lg overflow-hidden z-50">
-                        {teamMembers.map(person => (
+                        {availableTeamMembers.map(person => (
                           <button
                             key={person}
                             onClick={() => {
