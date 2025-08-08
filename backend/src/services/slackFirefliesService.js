@@ -143,6 +143,7 @@ class SlackFirefliesService {
         // Check if this is a Fireflies message
         if (this.isFirefliesSummary(text)) {
           console.log('📝 Found Fireflies message, parsing...');
+          console.log('Message length:', text.length, 'characters');
           
           try {
             const meeting = this.parseFirefliesMeeting(message);
@@ -218,7 +219,14 @@ class SlackFirefliesService {
     const text = message.text || '';
     const timestamp = message.ts ? new Date(parseFloat(message.ts) * 1000) : new Date();
     
-    console.log('Parsing message text:', text.substring(0, 100));
+    console.log('Parsing message text (first 200 chars):', text.substring(0, 200));
+    console.log('Full message length:', text.length);
+    
+    // Check if message is truncated (Slack messages get cut off around 3000-4000 chars)
+    const isTruncated = text.includes('...') && text.length > 2500;
+    if (isTruncated) {
+      console.log('⚠️ Message appears to be truncated by Slack');
+    }
     
     // Extract title from Slack formatted link
     let title = 'Meeting';
@@ -238,6 +246,7 @@ class SlackFirefliesService {
     const urlMatch = text.match(/https:\/\/app\.fireflies\.ai\/view\/[^|>]+/);
     if (urlMatch) {
       meetingUrl = urlMatch[0];
+      console.log('Meeting URL:', meetingUrl);
     }
     
     // Extract date, time, and duration
@@ -299,62 +308,64 @@ class SlackFirefliesService {
       overview = overviewMatch[1].trim();
     }
     
-    // UPDATED: Extract REAL action items with assignees
+    // IMPORTANT: Check if Action Items section exists
     let actionItems = [];
+    const hasActionItemsSection = text.includes('*Action Items:*');
     
-    // Look for the Action Items section
-    const actionItemsMatch = text.match(/\*Action Items:\*\s*\n?([\s\S]*?)(?:\*[A-Z]|$)/);
-    if (actionItemsMatch) {
-      const actionItemsText = actionItemsMatch[1];
-      console.log('Found action items section:', actionItemsText.substring(0, 200));
+    if (hasActionItemsSection) {
+      console.log('✅ Found Action Items section in message');
       
-      // Pattern to match person names followed by their action items
-      // Pattern: **Name:** or *Name:*
-      const personPattern = /\*\*?([^:*]+):\*\*?\s*\n?([\s\S]*?)(?=\*\*?[^:*]+:\*\*?|$)/g;
-      let match;
-      
-      while ((match = personPattern.exec(actionItemsText)) !== null) {
-        const assignee = match[1].trim();
-        const tasksText = match[2].trim();
+      // Look for the Action Items section
+      const actionItemsMatch = text.match(/\*Action Items:\*\s*\n?([\s\S]*?)(?:$)/);
+      if (actionItemsMatch) {
+        const actionItemsText = actionItemsMatch[1];
+        console.log('Action items text length:', actionItemsText.length);
         
-        // Split the tasks text into individual items
-        const tasks = tasksText
-          .split('\n')
-          .map(line => line.trim())
-          .filter(line => line.length > 5) // Filter out very short lines
-          .map(line => {
-            // Remove bullet points or dashes
-            return line.replace(/^[-•*]\s*/, '').trim();
-          })
-          .filter(task => task.length > 0);
+        // Pattern to match person names followed by their action items
+        // Pattern: **Name:** or *Name:*
+        const personPattern = /\*\*?([^:*]+):\*\*?\s*\n?([\s\S]*?)(?=\*\*?[^:*]+:\*\*?|$)/g;
+        let match;
         
-        // Add each task with its assignee
-        tasks.forEach(task => {
-          actionItems.push({
-            task: task,
-            assignee: assignee,
-            isAssigned: true
+        while ((match = personPattern.exec(actionItemsText)) !== null) {
+          const assignee = match[1].trim();
+          const tasksText = match[2].trim();
+          
+          console.log(`Found tasks for ${assignee}`);
+          
+          // Split the tasks text into individual items
+          const tasks = tasksText
+            .split('\n')
+            .map(line => line.trim())
+            .filter(line => line.length > 5) // Filter out very short lines
+            .map(line => {
+              // Remove bullet points or dashes
+              return line.replace(/^[-•*]\s*/, '').trim();
+            })
+            .filter(task => task.length > 0);
+          
+          // Add each task with its assignee
+          tasks.forEach(task => {
+            actionItems.push({
+              task: task,
+              assignee: assignee,
+              isAssigned: true
+            });
           });
-        });
-      }
-      
-      // If no structured action items found, try to extract from overview
-      if (actionItems.length === 0 && overview) {
-        const lines = overview.split('\n');
-        for (const line of lines) {
-          const cleaned = line.trim();
-          if (cleaned.startsWith('-') || cleaned.startsWith('•')) {
-            const item = cleaned.replace(/^[-•]\s*/, '').trim();
-            if (item.length > 10) {
-              actionItems.push({
-                task: item,
-                assignee: null,
-                isAssigned: false
-              });
-            }
-          }
         }
       }
+    } else {
+      console.log('⚠️ No Action Items section found - message may be truncated');
+      console.log('Message ends with:', text.slice(-200));
+      
+      // Since the message is truncated and we don't have real action items,
+      // we should NOT use the overview bullet points as action items
+      // Instead, indicate that the full action items need to be fetched from Fireflies directly
+      actionItems.push({
+        task: `View full meeting details and action items in Fireflies (message truncated by Slack)`,
+        assignee: 'Team',
+        isAssigned: false,
+        isTruncated: true
+      });
     }
     
     console.log(`Extracted ${actionItems.length} action items`);
@@ -362,18 +373,6 @@ class SlackFirefliesService {
     // Use gist as overview if no overview found
     if (!overview && gist) {
       overview = gist;
-    }
-    
-    // If still no overview, use portion of the text
-    if (!overview) {
-      // Try to extract meaningful content after participants
-      const afterParticipants = text.split('*Participants:*')[1];
-      if (afterParticipants) {
-        const contentMatch = afterParticipants.match(/[^*\n]+\s+([^*]+)/);
-        if (contentMatch) {
-          overview = contentMatch[1].substring(0, 200) + '...';
-        }
-      }
     }
     
     const meeting = {
@@ -385,21 +384,23 @@ class SlackFirefliesService {
       duration: duration || 'N/A',
       attendees: participants.length,
       participants: participants,
-      actionItems: actionItems, // Now includes assignee information
+      actionItems: actionItems,
       overview: overview || 'No overview available',
       gist: gist,
       summary: gist || overview || 'No summary available',
       source: 'slack-fireflies',
       meetingUrl: meetingUrl,
       firefliesUrl: meetingUrl,
-      slackTimestamp: message.ts
+      slackTimestamp: message.ts,
+      isTruncated: isTruncated || !hasActionItemsSection
     };
     
     console.log('Created meeting object:', { 
       title: meeting.title, 
       date: meeting.dateFormatted,
       attendees: meeting.attendees,
-      actionItemsCount: meeting.actionItems.length
+      actionItemsCount: meeting.actionItems.length,
+      isTruncated: meeting.isTruncated
     });
     
     return meeting;
@@ -451,9 +452,12 @@ class SlackFirefliesService {
       messagesFound: messages.length,
       messages: messages.map(msg => ({
         text: msg.text?.substring(0, 200),
+        fullLength: msg.text?.length || 0,
         timestamp: new Date(parseFloat(msg.ts) * 1000).toISOString(),
         user: msg.user,
-        isFireflies: this.isFirefliesSummary(msg.text || '')
+        isFireflies: this.isFirefliesSummary(msg.text || ''),
+        hasActionItems: msg.text?.includes('*Action Items:*') || false,
+        isTruncated: msg.text?.length > 2500 && msg.text?.includes('...')
       }))
     };
   }
