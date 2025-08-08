@@ -17,25 +17,25 @@ const TABLES = {
   clients: {
     name: 'Clients', 
     icon: '🏢',
-    columns: ['name', 'industry', 'status', 'notes'],
+    columns: ['brand_article', 'domain', 'type', 'contact_name', 'email', 'notes'],
     types: {}
   },
   people: {
     name: 'People',
     icon: '👥', 
-    columns: ['name', 'role', 'company', 'email'],
+    columns: ['name', 'email', 'role', 'department', 'phone'],
     types: {}
   },
   outreach: {
     name: 'Outreach',
     icon: '📧',
-    columns: ['channel', 'content', 'response', 'next_step'],
+    columns: ['type', 'subject', 'content', 'status', 'scheduled_date'],
     types: {}
   },
-  logs: {
+  activity_logs: {
     name: 'Activity Logs',
     icon: '📝',
-    columns: ['type', 'message', 'created_by', 'timestamp'],
+    columns: ['action', 'entity_type', 'details', 'created_at'],
     types: {}
   }
 };
@@ -98,7 +98,17 @@ export default function SupaDashboard() {
   const addNewRow = async () => {
     try {
       const newRow = TABLES[activeTable].columns.reduce((acc, col) => {
-        acc[col] = col === 'confidence' ? 50 : '';
+        if (col === 'confidence') {
+          acc[col] = 50;
+        } else if (col === 'stage') {
+          acc[col] = 'new';
+        } else if (col === 'type' && activeTable === 'clients') {
+          acc[col] = 'Brand';
+        } else if (col === 'status') {
+          acc[col] = 'planned';
+        } else {
+          acc[col] = '';
+        }
         return acc;
       }, {});
 
@@ -132,16 +142,15 @@ export default function SupaDashboard() {
     }
   };
 
-  const logActivity = async (type, message, sourceId = null) => {
+  const logActivity = async (action, message, entityId = null) => {
     try {
       await supabase
-        .from('logs')
+        .from('activity_logs')
         .insert([{
-          type,
-          message,
-          source_id: sourceId,
-          source_table: activeTable,
-          created_by: 'dashboard_user'
+          action,
+          entity_type: activeTable,
+          entity_id: entityId,
+          details: { message }
         }]);
     } catch (error) {
       console.error('Error logging activity:', error);
@@ -170,11 +179,14 @@ export default function SupaDashboard() {
 
   const formatCellValue = (value, column) => {
     if (!value) return '';
-    if (column === 'timestamp' || column === 'created_at') {
+    if (column === 'created_at' || column === 'updated_at' || column === 'scheduled_date') {
       return new Date(value).toLocaleString();
     }
     if (column === 'confidence' && typeof value === 'number') {
       return `${value}%`;
+    }
+    if (column === 'details' && typeof value === 'object') {
+      return JSON.stringify(value);
     }
     return value;
   };
@@ -186,16 +198,26 @@ export default function SupaDashboard() {
         contacted: 'bg-yellow-500', 
         demo: 'bg-purple-500',
         proposal: 'bg-orange-500',
-        won: 'bg-green-500',
-        lost: 'bg-red-500'
+        negotiation: 'bg-indigo-500',
+        'closed-won': 'bg-green-500',
+        'closed-lost': 'bg-red-500'
       };
       return colors[value] || 'bg-gray-500';
     }
     if (column === 'status') {
       const colors = {
-        active: 'bg-green-500',
-        paused: 'bg-yellow-500',
-        lost: 'bg-red-500'
+        planned: 'bg-blue-500',
+        sent: 'bg-yellow-500',
+        responded: 'bg-green-500',
+        'no-response': 'bg-red-500'
+      };
+      return colors[value] || 'bg-gray-500';
+    }
+    if (column === 'type' && activeTable === 'clients') {
+      const colors = {
+        Brand: 'bg-purple-500',
+        Agency: 'bg-orange-500',
+        IP: 'bg-blue-500'
       };
       return colors[value] || 'bg-gray-500';
     }
@@ -261,7 +283,7 @@ export default function SupaDashboard() {
                 <tr>
                   {TABLES[activeTable].columns.map(column => (
                     <th key={column} className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider">
-                      {column.replace('_', ' ')}
+                      {column.replace(/_/g, ' ')}
                     </th>
                   ))}
                   <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider">
@@ -275,15 +297,45 @@ export default function SupaDashboard() {
                     {TABLES[activeTable].columns.map(column => (
                       <td key={column} className="px-4 py-3">
                         {editingCell === `${row.id}-${column}` ? (
-                          <input
-                            type={TABLES[activeTable].types[column] === 'number' ? 'number' : 'text'}
-                            value={tempValue}
-                            onChange={(e) => setTempValue(e.target.value)}
-                            onKeyPress={(e) => handleKeyPress(e, row.id, column)}
-                            onBlur={() => handleCellSave(row.id, column)}
-                            className="w-full bg-transparent border border-blue-500 rounded px-2 py-1 text-sm"
-                            autoFocus
-                          />
+                          column === 'type' && activeTable === 'clients' ? (
+                            <select
+                              value={tempValue}
+                              onChange={(e) => setTempValue(e.target.value)}
+                              onBlur={() => handleCellSave(row.id, column)}
+                              className="w-full bg-transparent border border-blue-500 rounded px-2 py-1 text-sm"
+                              autoFocus
+                            >
+                              <option value="Brand">Brand</option>
+                              <option value="Agency">Agency</option>
+                              <option value="IP">IP</option>
+                            </select>
+                          ) : column === 'stage' ? (
+                            <select
+                              value={tempValue}
+                              onChange={(e) => setTempValue(e.target.value)}
+                              onBlur={() => handleCellSave(row.id, column)}
+                              className="w-full bg-transparent border border-blue-500 rounded px-2 py-1 text-sm"
+                              autoFocus
+                            >
+                              <option value="new">new</option>
+                              <option value="contacted">contacted</option>
+                              <option value="demo">demo</option>
+                              <option value="proposal">proposal</option>
+                              <option value="negotiation">negotiation</option>
+                              <option value="closed-won">closed-won</option>
+                              <option value="closed-lost">closed-lost</option>
+                            </select>
+                          ) : (
+                            <input
+                              type={TABLES[activeTable].types[column] === 'number' ? 'number' : 'text'}
+                              value={tempValue}
+                              onChange={(e) => setTempValue(e.target.value)}
+                              onKeyPress={(e) => handleKeyPress(e, row.id, column)}
+                              onBlur={() => handleCellSave(row.id, column)}
+                              className="w-full bg-transparent border border-blue-500 rounded px-2 py-1 text-sm"
+                              autoFocus
+                            />
+                          )
                         ) : (
                           <div
                             onClick={() => handleCellClick(row.id, column, row[column])}
