@@ -1,0 +1,22 @@
+// Apply these changes to frontend/src/App.js
+
+// 1. Add import at line 6:
+import Production from './components/Production';
+
+// 2. Change line 503 from:
+{['dashboard', 'magic-inbox', 'supa', 'integrations'].map(tab => (
+// TO:
+{['dashboard', 'magic-inbox', 'supa', 'production', 'integrations'].map(tab => (
+
+// 3. Change line 511-513 from:
+{tab === 'magic-inbox' ? '✨ Magic Inbox' : 
+ tab === 'supa' ? '🗄️ SUPA' :
+ tab.charAt(0).toUpperCase() + tab.slice(1)}
+// TO:
+{tab === 'magic-inbox' ? '✨ Magic Inbox' : 
+ tab === 'supa' ? '🗄️ SUPA' :
+ tab === 'production' ? '🎬 Production' :
+ tab.charAt(0).toUpperCase() + tab.slice(1)}
+
+// 4. Add after line 927 (after {activeTab === 'supa' && <SupaDashboard />}):
+{activeTab === 'production' && <Production />}
