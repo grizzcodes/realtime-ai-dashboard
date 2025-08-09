@@ -32,6 +32,14 @@ const IntegrationService = require('./src/services/integrationService');
 const integrationService = new IntegrationService();
 global.integrationService = integrationService;
 
+// Initialize Supabase client and make it available to routes
+const { createClient } = require('@supabase/supabase-js');
+const supabaseClient = createClient(
+  process.env.SUPABASE_URL || '',
+  process.env.SUPABASE_ANON_KEY || ''
+);
+app.locals.supabaseClient = supabaseClient;
+
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.json({
@@ -41,6 +49,10 @@ app.get('/health', (req, res) => {
     uptime: process.uptime()
   });
 });
+
+// Production routes
+const productionRoutes = require('./src/routes/production');
+app.use('/api/production', productionRoutes);
 
 // Load route modules
 require('./server.js'); // Gmail routes
@@ -76,6 +88,7 @@ server.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`📊 Dashboard: http://localhost:${PORT}/health`);
   console.log('🔗 WebSocket server active');
+  console.log('🎬 Production tab available at /api/production`);
   console.log('🎙️ Fireflies API integrated');
   console.log('💬 Slack Fireflies integration available');
   console.log('🪝 Fireflies webhook ready at /api/webhook/fireflies');
