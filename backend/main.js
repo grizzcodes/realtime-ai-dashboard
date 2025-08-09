@@ -88,7 +88,7 @@ server.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`📊 Dashboard: http://localhost:${PORT}/health`);
   console.log('🔗 WebSocket server active');
-  console.log('🎬 Production tab available at /api/production`);
+  console.log('🎬 Production tab available at /api/production');
   console.log('🎙️ Fireflies API integrated');
   console.log('💬 Slack Fireflies integration available');
   console.log('🪝 Fireflies webhook ready at /api/webhook/fireflies');
