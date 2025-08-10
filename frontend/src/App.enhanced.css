@@ -1,0 +1,225 @@
+/* Enhanced Dashboard Styles with Smooth Animations */
+
+/* Expandable Card Animations */
+.expandable-card-enter {
+  opacity: 0;
+  transform: scale(0.95);
+}
+
+.expandable-card-enter-active {
+  opacity: 1;
+  transform: scale(1);
+  transition: all 500ms ease-out;
+}
+
+.expandable-card-exit {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.expandable-card-exit-active {
+  opacity: 0;
+  transform: scale(0.95);
+  transition: all 500ms ease-in;
+}
+
+/* Archive Animation */
+@keyframes archiveSlideOut {
+  0% {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+  50% {
+    opacity: 0.5;
+    transform: translateX(20px) scale(0.95);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(100px) scale(0.9);
+  }
+}
+
+.email-archiving {
+  animation: archiveSlideOut 1.5s ease-out forwards;
+}
+
+.email-archived {
+  background: rgba(34, 197, 94, 0.1) !important;
+  border: 1px solid rgba(34, 197, 94, 0.3);
+  position: relative;
+}
+
+.email-archived::after {
+  content: '✓ Archived';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: rgb(34, 197, 94);
+  font-weight: bold;
+  font-size: 14px;
+  animation: fadeInOut 1.5s ease-out;
+}
+
+@keyframes fadeInOut {
+  0% { opacity: 0; }
+  50% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+/* Smooth Expand/Collapse Transitions */
+.expand-transition {
+  transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.expanded-shadow {
+  box-shadow: 
+    0 20px 25px -5px rgba(0, 0, 0, 0.1),
+    0 10px 10px -5px rgba(0, 0, 0, 0.04),
+    0 0 0 1px rgba(255, 255, 255, 0.1);
+}
+
+/* Enhanced Loading States */
+.skeleton-loader {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.05) 25%,
+    rgba(255, 255, 255, 0.1) 50%,
+    rgba(255, 255, 255, 0.05) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+/* Hover Effects for Expandable Cards */
+.expandable-hover {
+  transition: all 0.3s ease;
+}
+
+.expandable-hover:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.2);
+}
+
+/* Smooth Scrollbar for Expanded Content */
+.expanded-content::-webkit-scrollbar {
+  width: 8px;
+}
+
+.expanded-content::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
+}
+
+.expanded-content::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+}
+
+.expanded-content::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* Email Card Enhancements */
+.email-card {
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.email-card.archiving {
+  opacity: 0.6;
+  transform: scale(0.98);
+}
+
+.email-card.archived-success {
+  background: linear-gradient(
+    to right,
+    rgba(34, 197, 94, 0.1),
+    transparent
+  );
+}
+
+/* Archive Button Animation */
+.archive-btn {
+  transition: all 0.3s ease;
+}
+
+.archive-btn:hover {
+  transform: scale(1.1);
+}
+
+.archive-btn.archiving {
+  animation: pulse 1s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.1);
+    opacity: 0.7;
+  }
+}
+
+/* Expand Icon Animation */
+.expand-icon {
+  transition: transform 0.3s ease;
+}
+
+.expand-icon.expanded {
+  transform: rotate(180deg);
+}
+
+/* Content Fade In/Out */
+.content-transition {
+  animation: fadeIn 0.5s ease-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Backdrop Blur for Expanded Cards */
+.expanded-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(2px);
+  z-index: 15;
+  animation: fadeIn 0.3s ease-out;
+}
+
+/* Priority Responsive Expand */
+@media (max-width: 1024px) {
+  .expandable-card.expanded {
+    position: fixed;
+    top: 80px;
+    left: 20px;
+    right: 20px;
+    bottom: 20px;
+    z-index: 100;
+    max-height: calc(100vh - 100px) !important;
+  }
+}
