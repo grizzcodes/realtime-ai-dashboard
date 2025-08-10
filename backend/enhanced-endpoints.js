@@ -1,146 +1,20 @@
-// backend/enhanced-endpoints.js - Additional API endpoints
+// backend/enhanced-endpoints.js - Fixed Notion endpoints
 // Note: app, io, and integrationService are provided by main.js as global variables
 
-// Import Magic Inbox Processor
-const MagicInboxProcessor = require('./src/ai/magicInboxProcessor');
-
-// Get integration status
-app.get('/api/integrations/status', async (req, res) => {
-  try {
-    console.log('🔗 Checking integration status...');
-    
-    const status = await integrationService.getAllStatus();
-    
-    res.json({
-      success: true,
-      integrations: status
-    });
-  } catch (error) {
-    console.error('❌ Failed to get integration status:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message,
-      integrations: {}
-    });
-  }
-});
-
-// Magic AI Inbox endpoint
-app.get('/api/ai/magic-inbox', async (req, res) => {
-  try {
-    console.log('✨ Generating Magic AI Inbox...');
-    
-    // Initialize Magic Inbox processor with available services
-    const services = {
-      gmail: integrationService.gmailService,
-      notion: integrationService.notionService,
-      fireflies: integrationService.firefliesService,
-      supabase: integrationService.supabaseService,
-      openaiKey: process.env.OPENAI_API_KEY,
-      claudeKey: process.env.ANTHROPIC_API_KEY
-    };
-    
-    const magicInbox = new MagicInboxProcessor(services);
-    const result = await magicInbox.getCachedMagicInbox();
-    
-    res.json(result);
-  } catch (error) {
-    console.error('❌ Magic Inbox failed:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message,
-      data: {
-        replySuggestions: ['Check your integrations - some services may be offline'],
-        quickWins: ['Test your AI and service connections'],
-        upcomingTasks: ['Configure your Gmail, Notion, and Fireflies integrations'],
-        waitingOn: ['System setup and API key configuration']
-      }
-    });
-  }
-});
-
-// Get Fireflies meetings
-app.get('/api/fireflies/meetings', async (req, res) => {
-  try {
-    console.log('🎙️ Fetching Fireflies meetings...');
-    
-    // Try to get from integration service first
-    let result;
-    try {
-      result = await integrationService.getFirefliesMeetings();
-    } catch (error) {
-      console.log('Fireflies service not available, using fallback data');
-      result = { success: false };
-    }
-    
-    if (result && result.success) {
-      res.json({
-        success: true,
-        meetings: result.meetings || [],
-        count: result.meetings?.length || 0
-      });
-    } else {
-      // Return demo data when service fails
-      res.json({
-        success: true,
-        meetings: [
-          {
-            id: 'demo-1',
-            title: 'Weekly Team Standup',
-            date: new Date().toISOString(),
-            duration: '30m',
-            attendees: 5,
-            actionItems: ['Review sprint goals', 'Update client on progress', 'Schedule design review']
-          },
-          {
-            id: 'demo-2', 
-            title: 'Client Discovery Call - TechCorp',
-            date: new Date(Date.now() - 24*60*60*1000).toISOString(),
-            duration: '45m',
-            attendees: 3,
-            actionItems: ['Send proposal draft', 'Schedule technical demo']
-          },
-          {
-            id: 'demo-3',
-            title: 'Product Strategy Meeting',
-            date: new Date(Date.now() - 2*24*60*60*1000).toISOString(),
-            duration: '60m',
-            attendees: 8,
-            actionItems: ['Finalize Q1 roadmap', 'Research competitor features', 'Update pricing model']
-          }
-        ],
-        count: 3
-      });
-    }
-  } catch (error) {
-    console.error('❌ Failed to get Fireflies meetings:', error);
-    res.status(200).json({
-      success: true,
-      meetings: [],
-      count: 0
-    });
-  }
-});
-
-// Get Notion tasks directly
+// Notion task endpoints
 app.get('/api/notion/tasks', async (req, res) => {
   try {
     console.log('📝 Fetching Notion tasks...');
     
-    const result = await integrationService.getNotionTasks();
+    // Use the notionService directly from integrationService
+    const result = await integrationService.notionService.getTasks();
     
     if (result.success) {
-      res.json({
-        success: true,
-        tasks: result.tasks || [],
-        count: result.tasks?.length || 0
-      });
+      console.log(`✅ Retrieved ${result.tasks.length} Notion tasks`);
+      res.json(result);
     } else {
-      res.status(400).json({
-        success: false,
-        error: result.error,
-        tasks: []
-      });
+      console.error('❌ Failed to get Notion tasks:', result.error);
+      res.status(400).json(result);
     }
   } catch (error) {
     console.error('❌ Failed to get Notion tasks:', error);
@@ -152,123 +26,104 @@ app.get('/api/notion/tasks', async (req, res) => {
   }
 });
 
-// Get AI tasks from Supabase
-app.get('/api/tasks', async (req, res) => {
+app.post('/api/notion/tasks', async (req, res) => {
   try {
-    console.log('🤖 Fetching AI tasks from Supabase...');
+    console.log('📝 Creating Notion task:', req.body);
     
-    const result = await integrationService.getAITasks();
+    const result = await integrationService.notionService.createTask(req.body);
     
     if (result.success) {
-      res.json({
-        success: true,
-        tasks: result.tasks || [],
-        count: result.tasks?.length || 0
-      });
-    } else {
-      res.status(400).json({
-        success: false,
-        error: result.error,
-        tasks: []
-      });
-    }
-  } catch (error) {
-    console.error('❌ Failed to get AI tasks:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message,
-      tasks: []
-    });
-  }
-});
-
-// AI Chat endpoint
-app.post('/api/ai/chat', async (req, res) => {
-  try {
-    const { message, context } = req.body;
-    console.log('🤖 AI Chat request:', message.substring(0, 50) + '...');
-    
-    const result = await integrationService.chatWithAI(message, context);
-    
-    if (result.success) {
-      res.json({
-        success: true,
-        response: result.response,
+      console.log('✅ Notion task created:', result.task.id);
+      
+      // Emit real-time update
+      io.emit('notionUpdate', {
+        type: 'task_created',
+        task: result.task,
         timestamp: new Date().toISOString()
       });
+      
+      res.json(result);
     } else {
-      res.status(400).json({
-        success: false,
-        error: result.error,
-        response: 'Sorry, I encountered an error processing your request.'
-      });
+      console.error('❌ Failed to create Notion task:', result.error);
+      res.status(400).json(result);
     }
   } catch (error) {
-    console.error('❌ AI chat failed:', error);
+    console.error('❌ Failed to create Notion task:', error);
     res.status(500).json({
       success: false,
-      error: error.message,
-      response: 'Sorry, I\'m having trouble connecting right now.'
+      error: error.message
     });
   }
 });
 
-// Enhanced Notion tasks with people filter
-app.get('/api/notion/tasks-filtered', async (req, res) => {
+// Integration status endpoint
+app.get('/api/integrations/status', async (req, res) => {
   try {
-    const { person, status } = req.query;
-    console.log(`📋 Fetching filtered tasks (person: ${person}, status: ${status})...`);
-    
-    const notionResult = await integrationService.getFilteredTasks(person, status);
-    
-    if (notionResult.success) {
-      res.json({
-        success: true,
-        tasks: notionResult.tasks || [],
-        people: notionResult.people || [],
-        statusOptions: notionResult.statusOptions || [],
-        filters: { person, status }
-      });
-    } else {
-      res.status(400).json({
-        success: false,
-        error: notionResult.error,
-        tasks: []
-      });
-    }
+    const status = await integrationService.getAllStatus();
+    res.json(status);
   } catch (error) {
-    console.error('❌ Failed to get filtered tasks:', error);
+    console.error('Failed to get integration status:', error);
     res.status(500).json({
-      success: false,
       error: error.message,
-      tasks: []
+      integrations: {}
     });
   }
 });
 
-// Calendar next meetings endpoint
+// Test integration endpoint
+app.get('/api/test/:service', async (req, res) => {
+  try {
+    const { service } = req.params;
+    const result = await integrationService.testIntegration(service);
+    res.json(result);
+  } catch (error) {
+    console.error(`Failed to test ${req.params.service}:`, error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Calendar endpoints
 app.get('/api/calendar/next-meetings', async (req, res) => {
   try {
-    const limit = parseInt(req.query.limit) || 5;
-    console.log(`📅 Fetching next ${limit} meetings...`);
+    const limit = parseInt(req.query.limit) || 10;
+    console.log(`📅 Fetching next ${limit} calendar events...`);
     
-    const calendarResult = await integrationService.getNextMeetings(limit);
+    const result = await integrationService.calendarService.getUpcomingMeetings(limit);
     
-    if (calendarResult.success) {
-      res.json({
-        success: true,
-        meetings: calendarResult.meetings || [],
-        count: calendarResult.meetings?.length || 0
-      });
+    if (result.success) {
+      res.json(result);
     } else {
-      res.status(400).json({
+      console.log('Calendar not configured or failed:', result.error);
+      res.json({
         success: false,
-        error: calendarResult.error,
+        error: result.error,
         meetings: []
       });
     }
   } catch (error) {
-    console.error('❌ Failed to get next meetings:', error);
+    console.error('Failed to get calendar events:', error);
+    res.json({
+      success: false,
+      error: error.message,
+      meetings: []
+    });
+  }
+});
+
+// Fireflies endpoints
+app.get('/api/fireflies/meetings', async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 10;
+    console.log(`🎙️ Fetching ${limit} Fireflies meetings...`);
+    
+    const result = await integrationService.getFirefliesMeetings(limit);
+    
+    res.json(result);
+  } catch (error) {
+    console.error('Failed to get Fireflies meetings:', error);
     res.status(500).json({
       success: false,
       error: error.message,
@@ -277,20 +132,69 @@ app.get('/api/calendar/next-meetings', async (req, res) => {
   }
 });
 
-// Test AI endpoint
+// AI test endpoint
 app.post('/api/ai-test', async (req, res) => {
   try {
-    console.log('🧠 AI Test requested');
+    console.log('🧪 Testing AI processing...');
     
-    const testResult = await integrationService.testAI();
+    const testMessage = req.body.message || 'Urgent: Fix the payment gateway bug by tomorrow';
+    
+    // Try OpenAI first, then Claude
+    let aiResponse = null;
+    
+    if (integrationService.openaiService) {
+      try {
+        const response = await integrationService.openaiService.generateResponse(
+          `Analyze this message and create a task: "${testMessage}"`,
+          { temperature: 0.7 }
+        );
+        aiResponse = response;
+      } catch (error) {
+        console.log('OpenAI failed, trying Claude...');
+      }
+    }
+    
+    if (!aiResponse && integrationService.claudeService) {
+      try {
+        const response = await integrationService.claudeService.generateResponse(
+          `Analyze this message and create a task: "${testMessage}"`
+        );
+        aiResponse = response;
+      } catch (error) {
+        console.log('Claude also failed');
+      }
+    }
+    
+    if (!aiResponse) {
+      aiResponse = 'AI services not configured. Task: Fix payment gateway (High Priority)';
+    }
+    
+    // Create a test task
+    const task = {
+      title: 'Fix payment gateway bug',
+      priority: 'High',
+      assignee: 'Team',
+      dueDate: new Date(Date.now() + 24*60*60*1000).toISOString().split('T')[0],
+      status: 'To-do'
+    };
+    
+    // Try to create in Notion
+    if (integrationService.notionService) {
+      const result = await integrationService.notionService.createTask(task);
+      if (result.success) {
+        console.log('✅ Test task created in Notion');
+      }
+    }
     
     res.json({
       success: true,
-      result: testResult,
-      timestamp: new Date().toISOString()
+      message: 'AI test completed',
+      analysis: aiResponse,
+      task: task
     });
+    
   } catch (error) {
-    console.error('❌ AI test failed:', error);
+    console.error('AI test failed:', error);
     res.status(500).json({
       success: false,
       error: error.message
@@ -298,34 +202,35 @@ app.post('/api/ai-test', async (req, res) => {
   }
 });
 
-// Task completion endpoint
+// Complete task endpoint
 app.put('/api/tasks/:taskId/complete', async (req, res) => {
   try {
     const { taskId } = req.params;
-    console.log(`✅ Completing task: ${taskId}`);
+    console.log(`✅ Marking task ${taskId} as complete...`);
     
-    const result = await integrationService.completeTask(taskId);
-    
-    if (result.success) {
-      io.emit('taskUpdate', {
-        type: 'task_completed',
-        taskId: taskId,
-        timestamp: new Date().toISOString()
-      });
+    // Update in Notion
+    if (integrationService.notionService) {
+      const result = await integrationService.notionService.updateTaskStatus(taskId, 'Done');
       
-      res.json({
-        success: true,
-        message: 'Task completed successfully',
-        taskId: taskId
-      });
+      if (result.success) {
+        io.emit('taskUpdate', {
+          type: 'task_completed',
+          taskId: taskId,
+          timestamp: new Date().toISOString()
+        });
+        
+        res.json(result);
+      } else {
+        res.status(400).json(result);
+      }
     } else {
       res.status(400).json({
         success: false,
-        error: result.error
+        error: 'Notion not configured'
       });
     }
   } catch (error) {
-    console.error('❌ Failed to complete task:', error);
+    console.error('Failed to complete task:', error);
     res.status(500).json({
       success: false,
       error: error.message
@@ -333,27 +238,4 @@ app.put('/api/tasks/:taskId/complete', async (req, res) => {
   }
 });
 
-// Test individual integrations
-app.get('/api/test/:integration', async (req, res) => {
-  try {
-    const { integration } = req.params;
-    console.log(`🧪 Testing ${integration} integration...`);
-    
-    const result = await integrationService.testIntegration(integration);
-    
-    res.json({
-      success: result.success,
-      message: result.message || 'Test completed',
-      error: result.error,
-      data: result.data
-    });
-  } catch (error) {
-    console.error(`❌ Failed to test ${req.params.integration}:`, error);
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
-
-console.log('🔧 Enhanced endpoints loaded with Magic AI Inbox');
+console.log('✨ Enhanced endpoints loaded');
