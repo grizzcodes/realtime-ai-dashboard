@@ -215,17 +215,32 @@ const App = () => {
       const data = await response.json();
       
       if (data.success && data.meetings) {
-        // Transform the calendar data to match our frontend format
+        // Transform the calendar data to match our frontend format with enhanced time info
         const events = data.meetings.map(meeting => ({
           id: meeting.id,
           title: meeting.title,
           startTime: meeting.start,
           endTime: meeting.end,
-          attendees: meeting.attendees?.map(a => a.name || a.email) || [],
+          attendees: meeting.attendees || [],
+          attendeeCount: meeting.attendeeCount || meeting.attendees?.length || 0,
           location: meeting.location,
           meetLink: meeting.meetLink,
-          allDay: meeting.allDay
+          allDay: meeting.allDay,
+          description: meeting.description,
+          // Enhanced time information
+          timeUntil: meeting.timeUntil,
+          timeUntilStatus: meeting.timeUntilStatus,
+          timeUntilDetails: meeting.timeUntilDetails,
+          organizer: meeting.organizer
         }));
+        
+        // Check if using demo data
+        if (data.demo) {
+          console.log('📅 Using demo calendar data (configure Google OAuth for real events)');
+        } else if (data.needsAuth) {
+          console.log('📅 Calendar auth expired - please re-authenticate');
+        }
+        
         setCalendarEvents(events);
       } else {
         // Use fallback data if the API call fails
@@ -236,14 +251,18 @@ const App = () => {
             title: 'Product Launch Review',
             startTime: new Date(Date.now() + 2*60*60*1000).toISOString(),
             endTime: new Date(Date.now() + 3*60*60*1000).toISOString(),
-            attendees: ['Alec', 'Leo', 'Steph']
+            attendees: ['Alec', 'Leo', 'Steph'],
+            timeUntil: '2 hours',
+            timeUntilStatus: 'soon'
           },
           {
             id: 'cal-2',
             title: 'Client Onboarding',
             startTime: new Date(Date.now() + 24*60*60*1000).toISOString(),
             endTime: new Date(Date.now() + 25*60*60*1000).toISOString(),
-            attendees: ['Pablo', 'Alexa']
+            attendees: ['Pablo', 'Alexa'],
+            timeUntil: '1 day',
+            timeUntilStatus: 'upcoming'
           }
         ]);
       }
@@ -256,14 +275,18 @@ const App = () => {
           title: 'Product Launch Review',
           startTime: new Date(Date.now() + 2*60*60*1000).toISOString(),
           endTime: new Date(Date.now() + 3*60*60*1000).toISOString(),
-          attendees: ['Alec', 'Leo', 'Steph']
+          attendees: ['Alec', 'Leo', 'Steph'],
+          timeUntil: '2 hours',
+          timeUntilStatus: 'soon'
         },
         {
           id: 'cal-2',
           title: 'Client Onboarding',
           startTime: new Date(Date.now() + 24*60*60*1000).toISOString(),
           endTime: new Date(Date.now() + 25*60*60*1000).toISOString(),
-          attendees: ['Pablo', 'Alexa']
+          attendees: ['Pablo', 'Alexa'],
+          timeUntil: '1 day',
+          timeUntilStatus: 'upcoming'
         }
       ]);
     } finally {
@@ -661,7 +684,7 @@ const App = () => {
 
             {/* Middle Column - Calendar + Fireflies Meetings */}
             <div className="space-y-6">
-              {/* Calendar Events Box */}
+              {/* Calendar Events Box - ENHANCED VERSION */}
               <div className="card-glass p-6 animate-fade-in">
                 <div className="flex justify-between items-center mb-4">
                   <h2 className="text-xl font-bold text-glow flex items-center gap-2">
@@ -682,26 +705,69 @@ const App = () => {
                   </p>
                 ) : (
                   <div className="space-y-3 max-h-48 overflow-y-auto">
-                    {calendarEvents.map(event => (
-                      <div key={event.id} className="task-card">
-                        <h4 className="font-medium text-sm">{event.title}</h4>
-                        <div className="flex items-center justify-between mt-2">
-                          <div className="text-xs opacity-70">
-                            📅 {new Date(event.startTime).toLocaleDateString()} • {new Date(event.startTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                    {calendarEvents.map(event => {
+                      // Determine color based on time status
+                      const getTimeColor = () => {
+                        switch(event.timeUntilStatus) {
+                          case 'imminent': return 'text-red-400';
+                          case 'soon': return 'text-yellow-400';
+                          case 'ongoing': return 'text-green-400';
+                          case 'past': return 'text-gray-500';
+                          default: return 'text-blue-400';
+                        }
+                      };
+                      
+                      return (
+                        <div key={event.id} className="task-card">
+                          <div className="flex justify-between items-start mb-2">
+                            <h4 className="font-medium text-sm flex-1">{event.title}</h4>
+                            {event.timeUntil && (
+                              <span className={`text-xs font-semibold ${getTimeColor()}`}>
+                                {event.timeUntil}
+                              </span>
+                            )}
                           </div>
-                          {event.attendees && (
-                            <div className="text-xs opacity-60">
-                              {event.attendees.length} attendees
+                          
+                          <div className="flex items-center justify-between">
+                            <div className="text-xs opacity-70">
+                              📅 {new Date(event.startTime).toLocaleDateString()} • {new Date(event.startTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                            </div>
+                            {event.attendeeCount > 0 && (
+                              <div className="text-xs opacity-60">
+                                👥 {event.attendeeCount} attendee{event.attendeeCount !== 1 ? 's' : ''}
+                              </div>
+                            )}
+                          </div>
+                          
+                          {event.location && (
+                            <div className="text-xs opacity-60 mt-1">
+                              📍 {event.location}
                             </div>
                           )}
+                          
+                          {event.meetLink && (
+                            <a 
+                              href={event.meetLink} 
+                              target="_blank" 
+                              rel="noopener noreferrer" 
+                              className="inline-flex items-center gap-1 text-xs text-blue-400 hover:underline mt-2"
+                            >
+                              <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                <path d="M11 3a1 1 0 100 2h2.586l-6.293 6.293a1 1 0 101.414 1.414L15 6.414V9a1 1 0 102 0V4a1 1 0 00-1-1h-5z"/>
+                                <path d="M5 5a2 2 0 00-2 2v8a2 2 0 002 2h8a2 2 0 002-2v-3a1 1 0 10-2 0v3H5V7h3a1 1 0 000-2H5z"/>
+                              </svg>
+                              Join Meeting
+                            </a>
+                          )}
+                          
+                          {event.description && (
+                            <p className="text-xs opacity-50 mt-2 line-clamp-2">
+                              {event.description}
+                            </p>
+                          )}
                         </div>
-                        {event.meetLink && (
-                          <a href={event.meetLink} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-400 hover:underline mt-1 inline-block">
-                            Join Meeting
-                          </a>
-                        )}
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
