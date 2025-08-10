@@ -8,46 +8,85 @@ const slack = new WebClient(process.env.SLACK_BOT_TOKEN);
 function extractMeetingTitle(message) {
   const text = message.text || '';
   
-  // Try multiple patterns to find the meeting title
-  // Pattern 1: Look for "Meeting: [title]" or "Title: [title]"
-  let titleMatch = text.match(/(?:Meeting|Title|Subject):\s*(.+?)(?:\n|$)/i);
-  if (titleMatch) return titleMatch[1].trim();
+  // Debug logging
+  console.log('Extracting title from message:', text.substring(0, 200));
   
-  // Pattern 2: Look for meeting name in URL (mtm-jsvm-pqk format)
-  const urlMatch = text.match(/(?:fireflies\.ai\/view|app\.fireflies\.ai\/view)\/([a-z]+-[a-z]+-[a-z]+)/i);
-  if (urlMatch) {
-    // Convert URL slug to readable format: mtm-jsvm-pqk -> Mtm Jsvm Pqk
-    const meetingCode = urlMatch[1];
+  // Pattern 1: Look for "Your meeting recap - [meeting-code]" and convert to readable format
+  // Example: "Your meeting recap - mtm-jsvm-pqk" -> "Meeting Recap: MTM-JSVM-PQK"
+  const recapMatch = text.match(/Your meeting recap[:\s-]+([a-z]+-[a-z]+-[a-z]+)/i);
+  if (recapMatch) {
+    const meetingCode = recapMatch[1].toUpperCase();
+    console.log('Found meeting code:', meetingCode);
+    return `Meeting: ${meetingCode}`;
+  }
+  
+  // Pattern 2: If the first line is just a URL, try to extract meeting code from it
+  const lines = text.split('\n').map(l => l.trim()).filter(l => l);
+  if (lines[0] && lines[0].startsWith('http')) {
+    const urlMatch = lines[0].match(/\/([a-z]+-[a-z]+-[a-z]+)/i);
+    if (urlMatch) {
+      const meetingCode = urlMatch[1].toUpperCase();
+      console.log('Extracted from URL:', meetingCode);
+      return `Meeting: ${meetingCode}`;
+    }
+  }
+  
+  // Pattern 3: If the URL is somewhere in the text (not first line)
+  const urlInTextMatch = text.match(/https?:\/\/[^\s]*fireflies[^\s]*\/view\/([a-z]+-[a-z]+-[a-z]+)/i);
+  if (urlInTextMatch) {
+    const meetingCode = urlInTextMatch[1].toUpperCase();
+    console.log('Found meeting in URL:', meetingCode);
     
-    // Check if there's a cleaner title nearby in the text
-    const lines = text.split('\n');
-    for (const line of lines) {
-      // Skip lines that are URLs or look like metadata
-      if (!line.includes('http') && !line.includes('fireflies') && line.length > 5 && line.length < 100) {
-        // This might be the title
-        if (!line.includes(':') || line.startsWith('Meeting:') || line.startsWith('Title:')) {
-          const cleanTitle = line.replace(/^(Meeting|Title|Subject):\s*/i, '').trim();
-          if (cleanTitle) return cleanTitle;
+    // Try to find a better title in the message
+    // Look for patterns like "Meeting with X", "Call with Y", "1:1", etc.
+    const meetingPatterns = [
+      /(?:Meeting|Call|Sync|Discussion|Chat|1:1|One-on-one|Stand-?up|Review|Demo|Interview) (?:with |about |for |on |re: |re |regarding )(.+?)(?:\n|$)/i,
+      /Subject:\s*(.+?)(?:\n|$)/i,
+      /Title:\s*(.+?)(?:\n|$)/i,
+      /Topic:\s*(.+?)(?:\n|$)/i
+    ];
+    
+    for (const pattern of meetingPatterns) {
+      const match = text.match(pattern);
+      if (match && match[1]) {
+        const title = match[1].trim();
+        if (title && !title.includes('http')) {
+          console.log('Found better title:', title);
+          return title;
         }
       }
     }
     
-    // If no clean title found, use the meeting code
-    return `Meeting ${meetingCode}`;
+    return `Meeting: ${meetingCode}`;
   }
   
-  // Pattern 3: First non-empty line that's not a URL
-  const lines = text.split('\n').filter(line => line.trim());
-  for (const line of lines) {
-    if (!line.includes('http') && !line.includes('fireflies') && line.length > 5) {
-      return line.trim();
+  // Pattern 4: Clean up if first line is the Fireflies URL
+  if (lines[0] && lines[0].includes('fireflies.ai')) {
+    // Skip the URL line and look for a title in subsequent lines
+    for (let i = 1; i < Math.min(lines.length, 5); i++) {
+      const line = lines[i];
+      // Skip empty lines and lines that look like metadata
+      if (line && !line.startsWith('http') && !line.includes('Duration:') && !line.includes('Attendees:')) {
+        if (line.length < 100) {
+          console.log('Using line as title:', line);
+          return line;
+        }
+      }
     }
   }
   
-  // Pattern 4: Look for "Your meeting recap" subject pattern
-  const recapMatch = text.match(/Your meeting recap[:\s-]+(.+?)(?:\n|$)/i);
-  if (recapMatch) return recapMatch[1].trim();
+  // Pattern 5: If message starts with a URL but has other content
+  const textWithoutUrl = text.replace(/https?:\/\/[^\s]+/g, '').trim();
+  if (textWithoutUrl) {
+    const firstMeaningfulLine = textWithoutUrl.split('\n')[0].trim();
+    if (firstMeaningfulLine && firstMeaningfulLine.length < 100) {
+      console.log('Using first line without URL:', firstMeaningfulLine);
+      return firstMeaningfulLine;
+    }
+  }
   
+  // Default fallback
+  console.log('No title found, using default');
   return 'Meeting Summary';
 }
 
@@ -101,16 +140,6 @@ async function getSlackFirefliesMeetings(req, res) {
     if (!channel) {
       console.log(`❌ Channel ${channelName} not found or bot doesn't have access`);
       
-      // Provide helpful debug info
-      const allChannelsResult = await slack.conversations.list({
-        exclude_archived: true,
-        types: 'public_channel,private_channel',
-        limit: 200
-      });
-      
-      const memberChannels = allChannelsResult.channels.filter(c => c.is_member);
-      console.log(`Bot is member of ${memberChannels.length} channels`);
-      
       return res.json({
         success: false,
         error: `Channel ${channelName} not found. Bot needs to be invited to the private channel.`,
@@ -143,28 +172,27 @@ async function getSlackFirefliesMeetings(req, res) {
     
     for (const message of messagesResult.messages || []) {
       // Look for Fireflies bot messages with meeting summaries
-      // Fireflies messages typically come from a bot or have specific formatting
       if ((message.bot_id || message.subtype === 'bot_message') && message.text) {
-        // Extract meeting title intelligently
-        const title = extractMeetingTitle(message);
-        
-        // Parse meeting information from various Fireflies formats
-        const durationMatch = message.text.match(/Duration:\s*(\d+)\s*(?:min|minutes)/i);
-        const dateMatch = message.text.match(/(?:Date|When):\s*(.+?)(?:\n|$)/i);
-        const attendeesMatch = message.text.match(/(?:Attendees|Participants):\s*(.+?)(?:\n|$)/i);
-        const summaryMatch = message.text.match(/(?:Summary|Overview|Notes):\s*(.+?)(?:\n\n|Action|$)/si);
-        const actionItemsMatch = message.text.match(/(?:Action Items?|Tasks?|Follow-ups?):\s*(.+?)(?:\n\n|$)/si);
-        
-        // Also check for Fireflies-specific formatting
+        // Check if it's likely a Fireflies message
         const isFirefliesMessage = 
+          message.text.includes('fireflies') ||
           message.text.includes('Fireflies') ||
-          message.text.includes('fireflies.ai') ||
-          message.text.includes('Meeting Summary') ||
           message.text.includes('meeting recap') ||
-          message.text.includes('Transcript') ||
-          (summaryMatch || actionItemsMatch);
+          message.text.includes('Meeting Summary') ||
+          message.text.includes('app.fireflies.ai') ||
+          message.text.match(/https?:\/\/[^\s]*fireflies[^\s]*/i);
         
         if (isFirefliesMessage) {
+          // Extract meeting title intelligently
+          const title = extractMeetingTitle(message);
+          
+          // Parse other meeting information
+          const durationMatch = message.text.match(/Duration:\s*(\d+)\s*(?:min|minutes)/i);
+          const dateMatch = message.text.match(/(?:Date|When):\s*(.+?)(?:\n|$)/i);
+          const attendeesMatch = message.text.match(/(?:Attendees|Participants):\s*(.+?)(?:\n|$)/i);
+          const summaryMatch = message.text.match(/(?:Summary|Overview|Notes):\s*(.+?)(?:\n\n|Action|$)/si);
+          const actionItemsMatch = message.text.match(/(?:Action Items?|Tasks?|Follow-ups?):\s*(.+?)(?:\n\n|$)/si);
+          
           const meeting = {
             id: message.ts,
             title: title, // Use the intelligently extracted title
@@ -219,30 +247,20 @@ async function getSlackFirefliesMeetings(req, res) {
             });
           }
 
-          // Extract Fireflies URL if present
+          // Extract Fireflies URL if present (for "View" button)
           const urlMatch = message.text.match(/https?:\/\/[^\s]+fireflies[^\s]+/i);
           if (urlMatch) {
             meeting.firefliesUrl = urlMatch[0];
           }
 
           meetings.push(meeting);
+          console.log(`Added meeting: "${meeting.title}"`);
         }
       }
     }
 
     console.log(`Found ${meetings.length} Fireflies meetings in Slack`);
     
-    // If no meetings found, provide helpful context
-    if (meetings.length === 0) {
-      console.log('📭 No Fireflies messages found. Checking for any bot messages...');
-      const botMessages = messagesResult.messages.filter(m => m.bot_id || m.subtype === 'bot_message');
-      console.log(`Found ${botMessages.length} bot messages total in the channel`);
-      
-      if (botMessages.length > 0) {
-        console.log('Sample bot message:', botMessages[0].text?.substring(0, 100));
-      }
-    }
-
     res.json({
       success: true,
       meetings: meetings,
@@ -257,25 +275,9 @@ async function getSlackFirefliesMeetings(req, res) {
   } catch (error) {
     console.error('❌ Failed to get Slack Fireflies meetings:', error);
     
-    // Provide specific error messages
-    let errorMessage = error.message;
-    let hint = '';
-    
-    if (error.data && error.data.error === 'invalid_auth') {
-      errorMessage = 'Slack authentication failed';
-      hint = 'Check your SLACK_BOT_TOKEN in .env file';
-    } else if (error.data && error.data.error === 'missing_scope') {
-      errorMessage = 'Bot missing required permissions';
-      hint = 'Add groups:read and groups:history scopes for private channels';
-    } else if (error.data && error.data.error === 'channel_not_found') {
-      errorMessage = 'Channel not accessible';
-      hint = 'Invite the bot to #fireflies-ai private channel';
-    }
-    
     res.status(500).json({
       success: false,
-      error: errorMessage,
-      hint: hint,
+      error: error.message,
       meetings: []
     });
   }
