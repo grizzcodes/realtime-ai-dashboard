@@ -487,6 +487,83 @@ class IntegrationService {
       };
     }
   }
+
+  async getFirefliesMeetings(limit = 10) {
+    try {
+      if (!process.env.FIREFLIES_API_KEY) {
+        return {
+          success: false,
+          error: 'Fireflies API key not configured',
+          meetings: []
+        };
+      }
+
+      const query = `
+        query {
+          transcripts(limit: ${limit}) {
+            id
+            title
+            date
+            duration
+            transcript_url
+            attendees {
+              name
+              email
+            }
+            summary {
+              gist
+              action_items
+              keywords
+            }
+          }
+        }
+      `;
+
+      const response = await fetch('https://api.fireflies.ai/graphql', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${process.env.FIREFLIES_API_KEY}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ query })
+      });
+
+      const data = await response.json();
+      
+      if (data.errors) {
+        return {
+          success: false,
+          error: data.errors[0].message,
+          meetings: []
+        };
+      }
+
+      const meetings = (data.data?.transcripts || []).map(transcript => ({
+        id: transcript.id,
+        title: transcript.title || 'Untitled Meeting',
+        date: transcript.date,
+        duration: transcript.duration ? `${Math.round(transcript.duration / 60)}m` : 'N/A',
+        attendees: transcript.attendees?.length || 0,
+        actionItems: transcript.summary?.action_items || [],
+        summary: transcript.summary?.gist || '',
+        keywords: transcript.summary?.keywords || [],
+        firefliesUrl: transcript.transcript_url || '#'
+      }));
+
+      return {
+        success: true,
+        meetings: meetings,
+        count: meetings.length
+      };
+      
+    } catch (error) {
+      return {
+        success: false,
+        error: error.message,
+        meetings: []
+      };
+    }
+  }
 }
 
 module.exports = IntegrationService;
