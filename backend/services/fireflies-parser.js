@@ -26,6 +26,9 @@ class FirefliesParser {
       timestamp: new Date(message.ts * 1000).toISOString()
     };
 
+    let currentActionPerson = null;
+    let isInActionSection = false;
+
     // Parse each block
     message.blocks.forEach((block, index) => {
       if (block.type === 'section' && block.text) {
@@ -101,36 +104,78 @@ class FirefliesParser {
           });
         }
         
-        // Action Items - Person names
-        if (index > 0 && message.blocks[index - 1].text?.text?.includes('*Action Items:*')) {
-          // This block contains a person's name for action items
-          const personMatch = text.match(/\*([^:*]+):\*/);
+        // Check if we're entering the action items section
+        if (text.includes('*Action Items:*')) {
+          isInActionSection = true;
+        }
+        
+        // Parse person names in action items section
+        if (isInActionSection) {
+          // Check if this block contains a person's name (format: *Name:*)
+          const personMatch = text.match(/^\*([^:*]+):\*$/);
           if (personMatch) {
-            const personName = personMatch[1].trim();
-            // Look ahead to next blocks for this person's actions
-            const actionsBlock = message.blocks[index + 1];
-            if (actionsBlock && actionsBlock.type === 'actions') {
-              // Actions are in the buttons
-              const actions = actionsBlock.elements?.map(element => {
-                if (element.type === 'button' && element.text) {
-                  return element.text.text;
-                }
-              }).filter(Boolean) || [];
-              
-              if (actions.length > 0) {
-                meeting.actionItems.push({
-                  assignee: personName,
-                  tasks: actions
-                });
-              }
-            }
+            currentActionPerson = personMatch[1].trim();
           }
         }
       }
+      
+      // Parse action items from actions blocks (checkboxes)
+      if (block.type === 'actions' && isInActionSection && currentActionPerson) {
+        const tasks = [];
+        
+        // Extract tasks from elements
+        block.elements?.forEach(element => {
+          // Fireflies uses checkboxes for action items
+          if (element.type === 'checkboxes' && element.options) {
+            element.options.forEach(option => {
+              let taskText = '';
+              
+              // Extract text from option
+              if (option.text) {
+                if (typeof option.text === 'string') {
+                  taskText = option.text;
+                } else if (option.text.text) {
+                  taskText = option.text.text;
+                }
+              }
+              
+              // Clean up the task text
+              if (taskText && taskText.trim()) {
+                tasks.push(taskText.trim());
+              }
+            });
+          }
+          
+          // Also handle buttons (in case format varies)
+          else if (element.type === 'button' && element.text?.text) {
+            const taskText = element.text.text.trim();
+            if (taskText) {
+              tasks.push(taskText);
+            }
+          }
+        });
+        
+        // Add to action items if we have tasks
+        if (tasks.length > 0) {
+          meeting.actionItems.push({
+            assignee: currentActionPerson,
+            tasks: tasks
+          });
+        }
+        
+        // Reset current person after processing their actions
+        currentActionPerson = null;
+      }
+      
+      // Stop parsing action items after a divider following action section
+      if (block.type === 'divider' && isInActionSection) {
+        isInActionSection = false;
+        currentActionPerson = null;
+      }
     });
 
-    // If no blocks parsing worked, try plain text
-    if (!meeting.title && message.text) {
+    // If no blocks parsing worked for URL, try plain text
+    if (!meeting.url && message.text) {
       const urlMatch = message.text.match(/https:\/\/app\.fireflies\.ai\/view\/[^\s<>]+/);
       if (urlMatch) {
         meeting.url = urlMatch[0];
@@ -166,22 +211,34 @@ class FirefliesParser {
         throw new Error(`Channel ${channelName} not found or bot doesn't have access`);
       }
       
+      console.log(`📍 Found channel: #${channelName} (${channel.is_private ? 'Private' : 'Public'})`);
+      
       // Get recent messages
       const messagesResult = await this.slack.conversations.history({
         channel: channel.id,
         limit: limit
       });
       
+      console.log(`📬 Retrieved ${messagesResult.messages.length} messages from channel`);
+      
       // Parse Fireflies messages
       const meetings = [];
+      let skippedCount = 0;
+      
       for (const message of messagesResult.messages) {
         // Only process bot messages with blocks
         if (message.bot_id && message.blocks) {
           const meeting = this.parseMeetingFromBlocks(message);
           if (meeting && meeting.url) {
             meetings.push(meeting);
+          } else {
+            skippedCount++;
           }
         }
+      }
+      
+      if (skippedCount > 0) {
+        console.log(`⚠️  Skipped ${skippedCount} messages without Fireflies data`);
       }
       
       return meetings;
@@ -222,6 +279,49 @@ class FirefliesParser {
     }
     
     return output.join('\n');
+  }
+
+  /**
+   * Get total action items count across all meetings
+   */
+  getTotalActionItems(meetings) {
+    return meetings.reduce((total, meeting) => {
+      const meetingActions = meeting.actionItems?.reduce((sum, item) => sum + item.tasks.length, 0) || 0;
+      return total + meetingActions;
+    }, 0);
+  }
+
+  /**
+   * Get action items by assignee across all meetings
+   */
+  getActionItemsByAssignee(meetings) {
+    const assigneeMap = {};
+    
+    meetings.forEach(meeting => {
+      meeting.actionItems?.forEach(item => {
+        if (!assigneeMap[item.assignee]) {
+          assigneeMap[item.assignee] = {
+            name: item.assignee,
+            tasks: [],
+            meetings: []
+          };
+        }
+        
+        item.tasks.forEach(task => {
+          assigneeMap[item.assignee].tasks.push({
+            task: task,
+            meeting: meeting.title || 'Untitled',
+            date: meeting.date
+          });
+        });
+        
+        if (!assigneeMap[item.assignee].meetings.includes(meeting.title)) {
+          assigneeMap[item.assignee].meetings.push(meeting.title || 'Untitled');
+        }
+      });
+    });
+    
+    return assigneeMap;
   }
 }
 
