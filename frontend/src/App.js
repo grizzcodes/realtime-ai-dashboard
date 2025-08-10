@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import io from 'socket.io-client';
-import { Send, MessageCircle, Users, Clock, RotateCcw, ChevronDown, Calendar, Plus } from 'lucide-react';
+import { Send, MessageCircle, Users, Clock, RotateCcw, ChevronDown, Calendar, Plus, Archive, Mail, CheckCircle } from 'lucide-react';
 import MagicInbox from './components/MagicInbox';
 import SupaDashboard from './components/SupaDashboard';
+import ExpandableCard from './components/ExpandableCard';
 import './App.css';
+import './App.enhanced.css';
 
 const App = () => {
   const [tasks, setTasks] = useState([]);
@@ -29,6 +31,8 @@ const App = () => {
   const [isLoadingMeetings, setIsLoadingMeetings] = useState(false);
   const [pushingToNotion, setPushingToNotion] = useState({});
   const [availableTeamMembers, setAvailableTeamMembers] = useState(['All']);
+  const [archivingEmails, setArchivingEmails] = useState({});
+  const [archivedEmails, setArchivedEmails] = useState({});
 
   // Use useMemo to prevent recreating on every render
   const teamMembers = useMemo(() => ['All', 'Alec', 'Leo', 'Steph', 'Pablo', 'Alexa', 'Anthony', 'Dany', 'Mathieu'], []);
@@ -70,6 +74,14 @@ const App = () => {
     const socket = io('http://localhost:3001');
     socket.on('connect', () => setIsConnected(true));
     socket.on('disconnect', () => setIsConnected(false));
+    
+    // Listen for email updates
+    socket.on('emailUpdate', (data) => {
+      console.log('📧 Email update received:', data);
+      if (data.type === 'email_archived') {
+        loadEmails();
+      }
+    });
     
     loadNotionTasks();
     loadEmails();
@@ -118,20 +130,42 @@ const App = () => {
   };
 
   const archiveEmail = async (emailId) => {
+    setArchivingEmails(prev => ({ ...prev, [emailId]: true }));
+    
     try {
       const response = await fetch(`http://localhost:3001/api/gmail/archive/${emailId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' }
       });
       
-      if (response.ok) {
-        setEmails(prev => prev.filter(e => e.id !== emailId));
-        console.log('Email archived successfully');
+      const result = await response.json();
+      
+      if (result.success) {
+        console.log('✅ Email archived successfully');
+        setArchivedEmails(prev => ({ ...prev, [emailId]: true }));
+        
+        // Remove email after animation
+        setTimeout(() => {
+          setEmails(prev => prev.filter(e => e.id !== emailId));
+          setArchivedEmails(prev => {
+            const newState = { ...prev };
+            delete newState[emailId];
+            return newState;
+          });
+        }, 1500);
       } else {
         console.error('Failed to archive email');
+        alert('Failed to archive email. Please try again.');
       }
     } catch (error) {
       console.error('Failed to archive email:', error);
+      alert('Error archiving email. Please try again.');
+    } finally {
+      setArchivingEmails(prev => {
+        const newState = { ...prev };
+        delete newState[emailId];
+        return newState;
+      });
     }
   };
 
@@ -497,6 +531,17 @@ const App = () => {
 
   const connectedCount = integrations.filter(i => i.status === 'connected').length;
 
+  // Helper function to get time color
+  const getTimeColor = (status) => {
+    switch(status) {
+      case 'imminent': return 'text-red-400';
+      case 'soon': return 'text-yellow-400';
+      case 'ongoing': return 'text-green-400';
+      case 'past': return 'text-gray-500';
+      default: return 'text-blue-400';
+    }
+  };
+
   return (
     <div className="min-h-screen">
       {/* Header with DGenz logo */}
@@ -594,206 +639,253 @@ const App = () => {
       <div className="p-6 pb-32">
         {activeTab === 'dashboard' && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Left Column - Notion Tasks */}
-            <div className="card-glass p-6 animate-fade-in">
-              <div className="flex justify-between items-center mb-4">
-                <div className="flex items-center gap-3">
-                  <span className="text-2xl">📝</span>
-                  
-                  {/* Person Dropdown - now shows actual team members from Notion */}
-                  <div className="relative">
-                    <button
-                      onClick={() => setShowPersonDropdown(!showPersonDropdown)}
-                      className="btn-glass px-3 py-2 rounded-lg flex items-center gap-2 text-sm"
-                    >
-                      {selectedPerson}
-                      <ChevronDown size={14} className={`transition-transform ${showPersonDropdown ? 'rotate-180' : ''}`} />
-                    </button>
-                    
-                    {showPersonDropdown && (
-                      <div className="absolute top-full left-0 mt-1 w-32 glass rounded-lg overflow-hidden z-50">
-                        {availableTeamMembers.map(person => (
-                          <button
-                            key={person}
-                            onClick={() => {
-                              setSelectedPerson(person);
-                              setShowPersonDropdown(false);
-                            }}
-                            className={`w-full px-3 py-2 text-left text-sm hover:bg-white hover:bg-opacity-10 transition-all ${
-                              selectedPerson === person ? 'bg-blue-500 bg-opacity-30' : ''
-                            }`}
-                          >
-                            {person}
-                          </button>
-                        ))}
-                      </div>
-                    )}
+            {/* Left Column - Notion Tasks with ExpandableCard */}
+            <ExpandableCard
+              title="Notion Tasks"
+              icon="📝"
+              count={filteredNotionTasks.length}
+              onRefresh={loadNotionTasks}
+              isLoading={isLoadingNotion}
+              className="expandable-hover"
+              expandedContent={
+                <>
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className="relative">
+                      <button
+                        onClick={() => setShowPersonDropdown(!showPersonDropdown)}
+                        className="btn-glass px-3 py-2 rounded-lg flex items-center gap-2 text-sm"
+                      >
+                        {selectedPerson}
+                        <ChevronDown size={14} className={`transition-transform ${showPersonDropdown ? 'rotate-180' : ''}`} />
+                      </button>
+                      
+                      {showPersonDropdown && (
+                        <div className="absolute top-full left-0 mt-1 w-32 glass rounded-lg overflow-hidden z-50">
+                          {availableTeamMembers.map(person => (
+                            <button
+                              key={person}
+                              onClick={() => {
+                                setSelectedPerson(person);
+                                setShowPersonDropdown(false);
+                              }}
+                              className={`w-full px-3 py-2 text-left text-sm hover:bg-white hover:bg-opacity-10 transition-all ${
+                                selectedPerson === person ? 'bg-blue-500 bg-opacity-30' : ''
+                              }`}
+                            >
+                              {person}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </div>
+                  
+                  <div className="space-y-3 expanded-content">
+                    {filteredNotionTasks.map(task => (
+                      <div key={task.id} className="task-card">
+                        <div className="flex justify-between items-start">
+                          <div className="flex-1">
+                            <h4 className="font-medium">{task.title || task.name}</h4>
+                            <div className="flex items-center gap-3 mt-2 text-xs opacity-70">
+                              <span>👤 {task.assignedTo}</span>
+                              {task.dueDate && (
+                                <span>📅 {new Date(task.dueDate).toLocaleDateString()}</span>
+                              )}
+                            </div>
+                            {task.priority && (
+                              <span className={`inline-block mt-2 px-2 py-1 text-xs rounded priority-${
+                                task.priority === 'High' ? 'high' :
+                                task.priority === 'Medium' ? 'medium' : 'low'
+                              }`}>
+                                {task.priority}
+                              </span>
+                            )}
+                          </div>
+                          <button
+                            onClick={() => completeTask(task.id)}
+                            className="btn-glass px-2 py-1 text-sm rounded"
+                          >
+                            ✓
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              }
+            >
+              {/* Collapsed view */}
+              <div className="flex items-center gap-3 mb-4">
+                <div className="relative">
+                  <button
+                    onClick={() => setShowPersonDropdown(!showPersonDropdown)}
+                    className="btn-glass px-3 py-2 rounded-lg flex items-center gap-2 text-sm"
+                  >
+                    {selectedPerson}
+                    <ChevronDown size={14} className={`transition-transform ${showPersonDropdown ? 'rotate-180' : ''}`} />
+                  </button>
+                  
+                  {showPersonDropdown && (
+                    <div className="absolute top-full left-0 mt-1 w-32 glass rounded-lg overflow-hidden z-50">
+                      {availableTeamMembers.map(person => (
+                        <button
+                          key={person}
+                          onClick={() => {
+                            setSelectedPerson(person);
+                            setShowPersonDropdown(false);
+                          }}
+                          className={`w-full px-3 py-2 text-left text-sm hover:bg-white hover:bg-opacity-10 transition-all ${
+                            selectedPerson === person ? 'bg-blue-500 bg-opacity-30' : ''
+                          }`}
+                        >
+                          {person}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
-                
-                <button
-                  onClick={loadNotionTasks}
-                  disabled={isLoadingNotion}
-                  className="btn-glass p-2 rounded-full transition-all"
-                >
-                  <RotateCcw size={16} className={isLoadingNotion ? 'animate-spin' : ''} />
-                </button>
               </div>
               
               {filteredNotionTasks.length === 0 ? (
                 <p className="opacity-70 text-center py-8">
                   {selectedPerson === 'All' 
-                    ? 'No pending tasks found. Check your Notion integration.'
-                    : `No pending tasks for ${selectedPerson}.`
+                    ? 'No pending tasks found.'
+                    : `No tasks for ${selectedPerson}.`
                   }
                 </p>
               ) : (
-                <div className="space-y-3 max-h-96 overflow-y-auto">
-                  {filteredNotionTasks.map(task => (
+                <div className="space-y-3">
+                  {filteredNotionTasks.slice(0, 3).map(task => (
                     <div key={task.id} className="task-card">
                       <div className="flex justify-between items-start">
                         <div className="flex-1">
-                          <h4 className="font-medium">{task.title || task.name}</h4>
-                          <div className="flex items-center gap-3 mt-2 text-xs opacity-70">
-                            <span>👤 {task.assignedTo}</span>
-                            {task.dueDate && (
-                              <span>📅 {new Date(task.dueDate).toLocaleDateString()}</span>
-                            )}
+                          <h4 className="font-medium text-sm">{task.title || task.name}</h4>
+                          <div className="text-xs opacity-70 mt-1">
+                            👤 {task.assignedTo}
                           </div>
-                          {task.priority && (
-                            <span className={`inline-block mt-2 px-2 py-1 text-xs rounded priority-${
-                              task.priority === 'High' ? 'high' :
-                              task.priority === 'Medium' ? 'medium' : 'low'
-                            }`}>
-                              {task.priority}
-                            </span>
-                          )}
                         </div>
-                        <button
-                          onClick={() => completeTask(task.id)}
-                          className="btn-glass px-2 py-1 text-sm rounded"
-                        >
-                          ✓
-                        </button>
                       </div>
                     </div>
                   ))}
+                  {filteredNotionTasks.length > 3 && (
+                    <p className="text-xs opacity-50 text-center">
+                      +{filteredNotionTasks.length - 3} more tasks
+                    </p>
+                  )}
                 </div>
               )}
-            </div>
+            </ExpandableCard>
 
             {/* Middle Column - Calendar + Fireflies Meetings */}
             <div className="space-y-6">
-              {/* Calendar Events Box - ENHANCED VERSION */}
-              <div className="card-glass p-6 animate-fade-in">
-                <div className="flex justify-between items-center mb-4">
-                  <h2 className="text-xl font-bold text-glow flex items-center gap-2">
-                    <Calendar size={20} className="text-blue-400" />
-                    Calendar ({calendarEvents.length})
-                  </h2>
-                  <button
-                    onClick={loadCalendarEvents}
-                    disabled={isLoadingCalendar}
-                    className="btn-glass p-2 rounded-full transition-all"
-                  >
-                    <RotateCcw size={16} className={isLoadingCalendar ? 'animate-spin' : ''} />
-                  </button>
-                </div>
-                {calendarEvents.length === 0 ? (
-                  <p className="opacity-70 text-center py-4">
-                    No upcoming events found. Check your Calendar integration.
-                  </p>
-                ) : (
-                  <div className="space-y-3 max-h-48 overflow-y-auto">
-                    {calendarEvents.map(event => {
-                      // Determine color based on time status
-                      const getTimeColor = () => {
-                        switch(event.timeUntilStatus) {
-                          case 'imminent': return 'text-red-400';
-                          case 'soon': return 'text-yellow-400';
-                          case 'ongoing': return 'text-green-400';
-                          case 'past': return 'text-gray-500';
-                          default: return 'text-blue-400';
-                        }
-                      };
-                      
-                      return (
-                        <div key={event.id} className="task-card">
-                          <div className="flex justify-between items-start mb-2">
-                            <h4 className="font-medium text-sm flex-1">{event.title}</h4>
-                            {event.timeUntil && (
-                              <span className={`text-xs font-semibold ${getTimeColor()}`}>
-                                {event.timeUntil}
-                              </span>
-                            )}
-                          </div>
-                          
-                          <div className="flex items-center justify-between">
-                            <div className="text-xs opacity-70">
-                              📅 {new Date(event.startTime).toLocaleDateString()} • {new Date(event.startTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                            </div>
-                            {event.attendeeCount > 0 && (
-                              <div className="text-xs opacity-60">
-                                👥 {event.attendeeCount} attendee{event.attendeeCount !== 1 ? 's' : ''}
-                              </div>
-                            )}
-                          </div>
-                          
-                          {event.location && (
-                            <div className="text-xs opacity-60 mt-1">
-                              📍 {event.location}
-                            </div>
-                          )}
-                          
-                          {event.meetLink && (
-                            <a 
-                              href={event.meetLink} 
-                              target="_blank" 
-                              rel="noopener noreferrer" 
-                              className="inline-flex items-center gap-1 text-xs text-blue-400 hover:underline mt-2"
-                            >
-                              <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                                <path d="M11 3a1 1 0 100 2h2.586l-6.293 6.293a1 1 0 101.414 1.414L15 6.414V9a1 1 0 102 0V4a1 1 0 00-1-1h-5z"/>
-                                <path d="M5 5a2 2 0 00-2 2v8a2 2 0 002 2h8a2 2 0 002-2v-3a1 1 0 10-2 0v3H5V7h3a1 1 0 000-2H5z"/>
-                              </svg>
-                              Join Meeting
-                            </a>
-                          )}
-                          
-                          {event.description && (
-                            <p className="text-xs opacity-50 mt-2 line-clamp-2">
-                              {event.description}
-                            </p>
+              {/* Calendar Events with ExpandableCard */}
+              <ExpandableCard
+                title="Calendar"
+                icon={<Calendar size={20} className="text-blue-400" />}
+                count={calendarEvents.length}
+                onRefresh={loadCalendarEvents}
+                isLoading={isLoadingCalendar}
+                className="expandable-hover"
+                expandedContent={
+                  <div className="space-y-3 expanded-content">
+                    {calendarEvents.map(event => (
+                      <div key={event.id} className="task-card">
+                        <div className="flex justify-between items-start mb-2">
+                          <h4 className="font-medium">{event.title}</h4>
+                          {event.timeUntil && (
+                            <span className={`text-sm font-semibold ${getTimeColor(event.timeUntilStatus)}`}>
+                              {event.timeUntil}
+                            </span>
                           )}
                         </div>
-                      );
-                    })}
+                        
+                        <div className="flex items-center justify-between">
+                          <div className="text-xs opacity-70">
+                            📅 {new Date(event.startTime).toLocaleDateString()} • {new Date(event.startTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                          </div>
+                          {event.attendeeCount > 0 && (
+                            <div className="text-xs opacity-60">
+                              👥 {event.attendeeCount} attendee{event.attendeeCount !== 1 ? 's' : ''}
+                            </div>
+                          )}
+                        </div>
+                        
+                        {event.location && (
+                          <div className="text-xs opacity-60 mt-1">
+                            📍 {event.location}
+                          </div>
+                        )}
+                        
+                        {event.meetLink && (
+                          <a 
+                            href={event.meetLink} 
+                            target="_blank" 
+                            rel="noopener noreferrer" 
+                            className="inline-flex items-center gap-1 text-xs text-blue-400 hover:underline mt-2"
+                          >
+                            <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                              <path d="M11 3a1 1 0 100 2h2.586l-6.293 6.293a1 1 0 101.414 1.414L15 6.414V9a1 1 0 102 0V4a1 1 0 00-1-1h-5z"/>
+                              <path d="M5 5a2 2 0 00-2 2v8a2 2 0 002 2h8a2 2 0 002-2v-3a1 1 0 10-2 0v3H5V7h3a1 1 0 000-2H5z"/>
+                            </svg>
+                            Join Meeting
+                          </a>
+                        )}
+                        
+                        {event.description && (
+                          <p className="text-xs opacity-50 mt-2">
+                            {event.description}
+                          </p>
+                        )}
+                      </div>
+                    ))}
                   </div>
-                )}
-              </div>
-
-              {/* Fireflies Meetings Box from Slack */}
-              <div className="card-glass p-6 animate-fade-in">
-                <div className="flex justify-between items-center mb-4">
-                  <h2 className="text-xl font-bold text-glow">🎙️ Meetings ({meetings.length})</h2>
-                  <button
-                    onClick={loadMeetings}
-                    disabled={isLoadingMeetings}
-                    className="btn-glass p-2 rounded-full transition-all"
-                  >
-                    <RotateCcw size={16} className={isLoadingMeetings ? 'animate-spin' : ''} />
-                  </button>
-                </div>
-                {meetings.length === 0 ? (
-                  <p className="opacity-70">
-                    No meetings found. Check your Slack #fireflies-ai channel.
+                }
+              >
+                {/* Collapsed view */}
+                {calendarEvents.length === 0 ? (
+                  <p className="opacity-70 text-center py-4">
+                    No upcoming events.
                   </p>
                 ) : (
-                  <div className="space-y-3 max-h-64 overflow-y-auto">
+                  <div className="space-y-3">
+                    {calendarEvents.slice(0, 2).map(event => (
+                      <div key={event.id} className="task-card">
+                        <div className="flex justify-between items-start mb-2">
+                          <h4 className="font-medium text-sm flex-1">{event.title}</h4>
+                          {event.timeUntil && (
+                            <span className={`text-xs font-semibold ${getTimeColor(event.timeUntilStatus)}`}>
+                              {event.timeUntil}
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-xs opacity-70">
+                          📅 {new Date(event.startTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                        </div>
+                      </div>
+                    ))}
+                    {calendarEvents.length > 2 && (
+                      <p className="text-xs opacity-50 text-center">
+                        +{calendarEvents.length - 2} more events
+                      </p>
+                    )}
+                  </div>
+                )}
+              </ExpandableCard>
+
+              {/* Fireflies Meetings with ExpandableCard */}
+              <ExpandableCard
+                title="Meetings"
+                icon="🎙️"
+                count={meetings.length}
+                onRefresh={loadMeetings}
+                isLoading={isLoadingMeetings}
+                className="expandable-hover"
+                expandedContent={
+                  <div className="space-y-3 expanded-content">
                     {meetings.map(meeting => (
                       <div key={meeting.id} className="task-card">
                         <div className="mb-3">
-                          <h4 className="font-medium text-sm line-clamp-2">{meeting.title}</h4>
+                          <h4 className="font-medium">{meeting.title}</h4>
                           <div className="flex items-center gap-4 mt-2 text-xs opacity-70">
                             <div className="flex items-center gap-1">
                               <Users size={12} />
@@ -809,7 +901,7 @@ const App = () => {
                         {(meeting.summary || meeting.gist || meeting.overview) && (
                           <div className="mb-3">
                             <h5 className="text-xs font-medium opacity-80 mb-1">Summary:</h5>
-                            <p className="text-xs opacity-70 line-clamp-3">
+                            <p className="text-xs opacity-70">
                               {meeting.summary || meeting.gist || meeting.overview}
                             </p>
                           </div>
@@ -819,15 +911,14 @@ const App = () => {
                           <div className="mb-3">
                             <h5 className="text-xs font-medium opacity-80 mb-1">Action Items:</h5>
                             <div className="space-y-1">
-                              {meeting.actionItems.slice(0, 3).map((item, index) => {
-                                // Handle both object format (with assignee) and string format
+                              {meeting.actionItems.map((item, index) => {
                                 const taskText = typeof item === 'object' ? item.task : item;
                                 const assignee = typeof item === 'object' ? item.assignee : null;
                                 
                                 return (
                                   <div key={index} className="flex items-center gap-2">
                                     <div className="flex-1">
-                                      <p className="text-xs opacity-70 line-clamp-1">
+                                      <p className="text-xs opacity-70">
                                         • {taskText}
                                       </p>
                                       {assignee && (
@@ -854,11 +945,6 @@ const App = () => {
                                   </div>
                                 );
                               })}
-                              {meeting.actionItems.length > 3 && (
-                                <div className="text-xs opacity-50">
-                                  +{meeting.actionItems.length - 3} more...
-                                </div>
-                              )}
                             </div>
                           </div>
                         )}
@@ -881,30 +967,115 @@ const App = () => {
                       </div>
                     ))}
                   </div>
+                }
+              >
+                {/* Collapsed view */}
+                {meetings.length === 0 ? (
+                  <p className="opacity-70 text-center py-4">
+                    No meetings found.
+                  </p>
+                ) : (
+                  <div className="space-y-3">
+                    {meetings.slice(0, 1).map(meeting => (
+                      <div key={meeting.id} className="task-card">
+                        <h4 className="font-medium text-sm">{meeting.title}</h4>
+                        <div className="flex items-center gap-4 mt-2 text-xs opacity-70">
+                          <span><Users size={12} className="inline" /> {meeting.attendees || 0}</span>
+                          <span><Clock size={12} className="inline" /> {meeting.duration || '0m'}</span>
+                        </div>
+                        {meeting.summary && (
+                          <p className="text-xs opacity-60 mt-2 line-clamp-2">
+                            {meeting.summary}
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                    {meetings.length > 1 && (
+                      <p className="text-xs opacity-50 text-center">
+                        +{meetings.length - 1} more meetings
+                      </p>
+                    )}
+                  </div>
                 )}
-              </div>
+              </ExpandableCard>
             </div>
 
-            {/* Right Column - Emails */}
-            <div className="card-glass p-6 animate-fade-in">
-              <div className="flex justify-between items-center mb-4">
-                <h2 className="text-xl font-bold text-glow">📧 Gmail ({emails.length})</h2>
-                <button
-                  onClick={loadEmails}
-                  disabled={isLoadingEmails}
-                  className="btn-glass p-2 rounded-full transition-all"
-                >
-                  <RotateCcw size={16} className={isLoadingEmails ? 'animate-spin' : ''} />
-                </button>
-              </div>
+            {/* Right Column - Emails with ExpandableCard */}
+            <ExpandableCard
+              title="Gmail"
+              icon="📧"
+              count={emails.length}
+              onRefresh={loadEmails}
+              isLoading={isLoadingEmails}
+              className="expandable-hover"
+              expandedContent={
+                <div className="space-y-3 expanded-content">
+                  {emails.map(email => (
+                    <div 
+                      key={email.id} 
+                      className={`task-card email-card ${
+                        archivingEmails[email.id] ? 'archiving' : ''
+                      } ${
+                        archivedEmails[email.id] ? 'email-archived archived-success' : ''
+                      }`}
+                    >
+                      <div className="flex justify-between items-start">
+                        <div className="flex-1">
+                          <h4 className="font-medium">{email.subject}</h4>
+                          <p className="text-sm opacity-70">
+                            {email.from}
+                          </p>
+                          <p className="text-xs opacity-60 mt-2">
+                            {email.snippet}
+                          </p>
+                        </div>
+                        <div className="flex gap-1">
+                          <button 
+                            onClick={() => archiveEmail(email.id)}
+                            disabled={archivingEmails[email.id] || archivedEmails[email.id]}
+                            className={`btn-glass archive-btn px-2 py-1 text-xs rounded transition-all ${
+                              archivedEmails[email.id] ? 'bg-green-500 bg-opacity-20' : ''
+                            }`}
+                            title="Archive Email"
+                          >
+                            {archivedEmails[email.id] ? (
+                              <CheckCircle size={14} className="text-green-400" />
+                            ) : archivingEmails[email.id] ? (
+                              <div className="loading-spinner border-white w-3 h-3"></div>
+                            ) : (
+                              <Archive size={14} />
+                            )}
+                          </button>
+                          <button 
+                            onClick={() => generateDraftReply(email)}
+                            className="btn-glass px-2 py-1 text-xs rounded"
+                            title="Generate Draft Reply"
+                          >
+                            <Mail size={14} />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              }
+            >
+              {/* Collapsed view */}
               {emails.length === 0 ? (
-                <p className="opacity-70">
-                  No emails found. Check your Gmail integration.
+                <p className="opacity-70 text-center py-8">
+                  No emails found.
                 </p>
               ) : (
-                <div className="space-y-3 max-h-[600px] overflow-y-auto">
-                  {emails.map(email => (
-                    <div key={email.id} className="task-card">
+                <div className="space-y-3">
+                  {emails.slice(0, 4).map(email => (
+                    <div 
+                      key={email.id} 
+                      className={`task-card email-card ${
+                        archivingEmails[email.id] ? 'archiving' : ''
+                      } ${
+                        archivedEmails[email.id] ? 'email-archived archived-success' : ''
+                      }`}
+                    >
                       <div className="flex justify-between items-start">
                         <div className="flex-1">
                           <h4 className="font-medium text-sm line-clamp-1">{email.subject}</h4>
@@ -918,25 +1089,39 @@ const App = () => {
                         <div className="flex gap-1">
                           <button 
                             onClick={() => archiveEmail(email.id)}
-                            className="btn-glass px-2 py-1 text-xs rounded"
+                            disabled={archivingEmails[email.id] || archivedEmails[email.id]}
+                            className={`btn-glass archive-btn px-2 py-1 text-xs rounded transition-all ${
+                              archivedEmails[email.id] ? 'bg-green-500 bg-opacity-20' : ''
+                            }`}
                             title="Archive Email"
                           >
-                            🗑️
+                            {archivedEmails[email.id] ? (
+                              <CheckCircle size={14} className="text-green-400" />
+                            ) : archivingEmails[email.id] ? (
+                              <div className="loading-spinner border-white w-3 h-3"></div>
+                            ) : (
+                              <Archive size={14} />
+                            )}
                           </button>
                           <button 
                             onClick={() => generateDraftReply(email)}
                             className="btn-glass px-2 py-1 text-xs rounded"
                             title="Generate Draft Reply"
                           >
-                            ✉️
+                            <Mail size={14} />
                           </button>
                         </div>
                       </div>
                     </div>
                   ))}
+                  {emails.length > 4 && (
+                    <p className="text-xs opacity-50 text-center">
+                      +{emails.length - 4} more emails
+                    </p>
+                  )}
                 </div>
               )}
-            </div>
+            </ExpandableCard>
           </div>
         )}
 
