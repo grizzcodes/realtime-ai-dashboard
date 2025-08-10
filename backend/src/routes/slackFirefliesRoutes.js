@@ -1,4 +1,4 @@
-// backend/src/routes/slackFirefliesRoutes.js - Fireflies integration via Slack
+// backend/src/routes/slackFirefliesRoutes.js - Enhanced Fireflies integration via Slack
 const { WebClient } = require('@slack/web-api');
 
 // Initialize Slack client
@@ -13,14 +13,20 @@ function extractMeetingTitle(message) {
   
   // Pattern 1: Look for "Your meeting recap - [meeting-code]" and convert to readable format
   // Example: "Your meeting recap - mtm-jsvm-pqk" -> "Meeting Recap: MTM-JSVM-PQK"
-  const recapMatch = text.match(/Your meeting recap[:\s-]+([a-z]+-[a-z]+-[a-z]+)/i);
+  const recapMatch = text.match(/Your meeting recap[\s-]+([a-z]+-[a-z]+-[a-z]+)/i);
   if (recapMatch) {
     const meetingCode = recapMatch[1].toUpperCase();
     console.log('Found meeting code:', meetingCode);
     return `Meeting: ${meetingCode}`;
   }
   
-  // Pattern 2: If the first line is just a URL, try to extract meeting code from it
+  // Pattern 2: Look for **Title:** format
+  const titleMatch = text.match(/\*\*Title:\*\*\s*(.+?)(?:\n|$)/);
+  if (titleMatch) {
+    return titleMatch[1].trim();
+  }
+  
+  // Pattern 3: If the first line is just a URL, try to extract meeting code from it
   const lines = text.split('\n').map(l => l.trim()).filter(l => l);
   if (lines[0] && lines[0].startsWith('http')) {
     const urlMatch = lines[0].match(/\/([a-z]+-[a-z]+-[a-z]+)/i);
@@ -31,63 +37,113 @@ function extractMeetingTitle(message) {
     }
   }
   
-  // Pattern 3: If the URL is somewhere in the text (not first line)
-  const urlInTextMatch = text.match(/https?:\/\/[^\s]*fireflies[^\s]*\/view\/([a-z]+-[a-z]+-[a-z]+)/i);
-  if (urlInTextMatch) {
-    const meetingCode = urlInTextMatch[1].toUpperCase();
-    console.log('Found meeting in URL:', meetingCode);
-    
-    // Try to find a better title in the message
-    // Look for patterns like "Meeting with X", "Call with Y", "1:1", etc.
-    const meetingPatterns = [
-      /(?:Meeting|Call|Sync|Discussion|Chat|1:1|One-on-one|Stand-?up|Review|Demo|Interview) (?:with |about |for |on |re: |re |regarding )(.+?)(?:\n|$)/i,
-      /Subject:\s*(.+?)(?:\n|$)/i,
-      /Title:\s*(.+?)(?:\n|$)/i,
-      /Topic:\s*(.+?)(?:\n|$)/i
-    ];
-    
-    for (const pattern of meetingPatterns) {
-      const match = text.match(pattern);
-      if (match && match[1]) {
-        const title = match[1].trim();
-        if (title && !title.includes('http')) {
-          console.log('Found better title:', title);
-          return title;
-        }
-      }
-    }
-    
-    return `Meeting: ${meetingCode}`;
-  }
-  
-  // Pattern 4: Clean up if first line is the Fireflies URL
-  if (lines[0] && lines[0].includes('fireflies.ai')) {
-    // Skip the URL line and look for a title in subsequent lines
-    for (let i = 1; i < Math.min(lines.length, 5); i++) {
-      const line = lines[i];
-      // Skip empty lines and lines that look like metadata
-      if (line && !line.startsWith('http') && !line.includes('Duration:') && !line.includes('Attendees:')) {
-        if (line.length < 100) {
-          console.log('Using line as title:', line);
-          return line;
-        }
-      }
-    }
-  }
-  
-  // Pattern 5: If message starts with a URL but has other content
-  const textWithoutUrl = text.replace(/https?:\/\/[^\s]+/g, '').trim();
-  if (textWithoutUrl) {
-    const firstMeaningfulLine = textWithoutUrl.split('\n')[0].trim();
-    if (firstMeaningfulLine && firstMeaningfulLine.length < 100) {
-      console.log('Using first line without URL:', firstMeaningfulLine);
-      return firstMeaningfulLine;
-    }
-  }
-  
   // Default fallback
   console.log('No title found, using default');
   return 'Meeting Summary';
+}
+
+// Parse action items from the specific Fireflies format
+function parseActionItems(text) {
+  const actionItems = [];
+  
+  // Look for **Action Items:** section
+  const actionMatch = text.match(/\*\*Action Items:\*\*(.+?)(?:\*\*|$)/s);
+  if (!actionMatch) {
+    console.log('No action items section found');
+    return actionItems;
+  }
+  
+  const actionText = actionMatch[1];
+  console.log('Found action items section:', actionText.substring(0, 500));
+  
+  // Split by person headers (e.g., "**Alec CHAPADOS:**")
+  const personPattern = /\*\*([^:*]+):\*\*/g;
+  let matches = [];
+  let match;
+  
+  // Find all person headers and their positions
+  while ((match = personPattern.exec(actionText)) !== null) {
+    matches.push({
+      person: match[1].trim(),
+      index: match.index,
+      endIndex: match.index + match[0].length
+    });
+  }
+  
+  // Process each person's tasks
+  for (let i = 0; i < matches.length; i++) {
+    const person = matches[i].person;
+    const startIndex = matches[i].endIndex;
+    const endIndex = (i < matches.length - 1) ? matches[i + 1].index : actionText.length;
+    
+    const tasksText = actionText.substring(startIndex, endIndex);
+    console.log(`Tasks for ${person}:`, tasksText);
+    
+    // Split tasks by newlines or bullet points
+    const tasks = tasksText
+      .split(/[\n•]/)
+      .map(t => t.trim())
+      .filter(t => t && t.length > 2);
+    
+    for (const task of tasks) {
+      // Clean up the task text
+      const cleanTask = task
+        .replace(/^[-*]\s*/, '')
+        .replace(/^\d+\.\s*/, '')
+        .replace(/\.$/, '')
+        .trim();
+      
+      if (cleanTask && !cleanTask.includes('👤')) {
+        actionItems.push({
+          task: cleanTask,
+          assignee: person,
+          source: 'fireflies'
+        });
+      }
+    }
+  }
+  
+  // If no structured format found, try to parse line by line
+  if (actionItems.length === 0) {
+    console.log('Trying alternative parsing...');
+    const lines = actionText.split('\n').filter(l => l.trim());
+    
+    let currentAssignee = 'Team';
+    for (const line of lines) {
+      // Check if this is a person header
+      if (line.includes(':') && !line.includes('http')) {
+        const possibleAssignee = line.split(':')[0].replace(/[*•\-]/g, '').trim();
+        if (possibleAssignee && possibleAssignee.length < 50) {
+          currentAssignee = possibleAssignee;
+          const taskPart = line.split(':')[1];
+          if (taskPart && taskPart.trim()) {
+            actionItems.push({
+              task: taskPart.trim(),
+              assignee: currentAssignee,
+              source: 'fireflies'
+            });
+          }
+        }
+      } else {
+        // This is a task line
+        const cleanTask = line
+          .replace(/^[•\-*]\s*/, '')
+          .replace(/^\d+\.\s*/, '')
+          .trim();
+        
+        if (cleanTask && cleanTask.length > 2) {
+          actionItems.push({
+            task: cleanTask,
+            assignee: currentAssignee,
+            source: 'fireflies'
+          });
+        }
+      }
+    }
+  }
+  
+  console.log(`Parsed ${actionItems.length} action items`);
+  return actionItems;
 }
 
 // Get Fireflies meetings from Slack channel
@@ -180,81 +236,63 @@ async function getSlackFirefliesMeetings(req, res) {
           message.text.includes('meeting recap') ||
           message.text.includes('Meeting Summary') ||
           message.text.includes('app.fireflies.ai') ||
-          message.text.match(/https?:\/\/[^\s]*fireflies[^\s]*/i);
+          message.text.match(/https?:\/\/[^\s]*fireflies[^\s]*/i) ||
+          message.text.includes('**Title:') ||
+          message.text.includes('**Gist:') ||
+          message.text.includes('**Overview:') ||
+          message.text.includes('**Action Items:');
         
         if (isFirefliesMessage) {
-          // Extract meeting title intelligently
-          const title = extractMeetingTitle(message);
+          const text = message.text;
           
-          // Parse other meeting information
-          const durationMatch = message.text.match(/Duration:\s*(\d+)\s*(?:min|minutes)/i);
-          const dateMatch = message.text.match(/(?:Date|When):\s*(.+?)(?:\n|$)/i);
-          const attendeesMatch = message.text.match(/(?:Attendees|Participants):\s*(.+?)(?:\n|$)/i);
-          const summaryMatch = message.text.match(/(?:Summary|Overview|Notes):\s*(.+?)(?:\n\n|Action|$)/si);
-          const actionItemsMatch = message.text.match(/(?:Action Items?|Tasks?|Follow-ups?):\s*(.+?)(?:\n\n|$)/si);
+          // Extract meeting title
+          let title = extractMeetingTitle(message);
+          
+          // Parse structured fields
+          const dateMatch = text.match(/\*\*Date and Time:\*\*\s*(.+?)(?:\n|$)/);
+          const participantsMatch = text.match(/\*\*Participants:\*\*\s*(.+?)(?:\n|$)/);
+          const gistMatch = text.match(/\*\*Gist:\*\*\s*(.+?)(?:\n|\*\*|$)/s);
+          const overviewMatch = text.match(/\*\*Overview:\*\*\s*(.+?)(?:\*\*Notes:|\*\*Action|$)/s);
+          const notesMatch = text.match(/\*\*Notes:\*\*\s*(.+?)(?:\*\*Action|$)/s);
+          const durationMatch = text.match(/\((\d+)\s*mins?\)/);
           
           const meeting = {
             id: message.ts,
-            title: title, // Use the intelligently extracted title
-            date: dateMatch ? dateMatch[1].trim() : new Date(parseFloat(message.ts) * 1000).toISOString(),
+            title: title,
+            date: new Date(parseFloat(message.ts) * 1000).toISOString(),
+            meetingDateTime: dateMatch ? dateMatch[1].trim() : null,
             duration: durationMatch ? `${durationMatch[1]}m` : 'N/A',
-            attendees: 0,
-            summary: summaryMatch ? summaryMatch[1].trim() : '',
-            actionItems: [],
+            participants: participantsMatch ? participantsMatch[1].trim() : null,
+            attendees: participantsMatch ? participantsMatch[1].split(',').length : 1,
+            gist: gistMatch ? gistMatch[1].trim() : null,
+            overview: overviewMatch ? overviewMatch[1].trim().replace(/\.\.\.$/, '') : null,
+            notes: notesMatch ? notesMatch[1].trim() : null,
+            summary: null,
+            actionItems: parseActionItems(text),
             source: 'slack-fireflies'
           };
-
-          // Parse attendees
-          if (attendeesMatch) {
-            const attendeesList = attendeesMatch[1].split(/[,;]/).map(a => a.trim());
-            meeting.attendees = attendeesList.length;
-            meeting.attendeeNames = attendeesList;
-          }
-
-          // Parse action items with better formatting support
-          if (actionItemsMatch) {
-            const actionItemsText = actionItemsMatch[1].trim();
-            // Support multiple formats: bullets, numbers, dashes, newlines
-            const items = actionItemsText.split(/[\n•\-\*]|(?:\d+\.)\s*/).filter(item => item.trim());
-            
-            meeting.actionItems = items.map(item => {
-              const cleanItem = item.trim();
-              
-              // Try to detect assignee from the action item text
-              let assignee = null;
-              
-              // Check if any attendee name is mentioned
-              if (meeting.attendeeNames) {
-                for (const attendeeName of meeting.attendeeNames) {
-                  const firstName = attendeeName.split(' ')[0];
-                  if (cleanItem.toLowerCase().includes(firstName.toLowerCase())) {
-                    assignee = firstName;
-                    break;
-                  }
-                }
-              }
-              
-              // Check for assignment patterns
-              const assignmentMatch = cleanItem.match(/\(([^)]+)\)|@(\w+)|assigned to:?\s*(\w+)/i);
-              if (assignmentMatch) {
-                assignee = assignmentMatch[1] || assignmentMatch[2] || assignmentMatch[3];
-              }
-              
-              return {
-                task: cleanItem.replace(/\([^)]+\)|@\w+|assigned to:?\s*\w+/gi, '').trim(),
-                assignee: assignee || 'Team'
-              };
-            });
+          
+          // If no overview/gist but there's a summary pattern
+          if (!meeting.overview && !meeting.gist) {
+            const summaryMatch = text.match(/\*\*Summary:\*\*\s*(.+?)(?:\*\*|$)/s);
+            if (summaryMatch) {
+              meeting.summary = summaryMatch[1].trim();
+            }
           }
 
           // Extract Fireflies URL if present (for "View" button)
-          const urlMatch = message.text.match(/https?:\/\/[^\s]+fireflies[^\s]+/i);
+          const urlMatch = text.match(/https?:\/\/[^\s]+fireflies[^\s]+/i);
           if (urlMatch) {
             meeting.firefliesUrl = urlMatch[0];
           }
 
           meetings.push(meeting);
-          console.log(`Added meeting: "${meeting.title}"`);
+          console.log(`Added meeting: "${meeting.title}" with ${meeting.actionItems.length} action items`);
+          
+          // Log first few action items for debugging
+          if (meeting.actionItems.length > 0) {
+            console.log('Sample action items:', meeting.actionItems.slice(0, 3));
+          }
         }
       }
     }
