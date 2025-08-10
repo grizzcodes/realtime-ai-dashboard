@@ -22,45 +22,68 @@ async function testSlackSetup() {
     const auth = await slack.auth.test();
     console.log(`✅ Bot authenticated as: ${auth.user} (Team: ${auth.team})\n`);
     
-    // 3. List all channels the bot can see
-    console.log('📋 Listing all accessible channels...');
-    const channelsResult = await slack.conversations.list({
+    // 3. List all channels the bot can see (including private)
+    console.log('📋 Listing all accessible channels (public and private)...');
+    
+    // Get public channels
+    const publicChannelsResult = await slack.conversations.list({
       exclude_archived: true,
-      types: 'public_channel,private_channel',
+      types: 'public_channel',
       limit: 200
     });
     
-    console.log(`Found ${channelsResult.channels.length} channels:\n`);
+    // Get private channels the bot is a member of
+    const privateChannelsResult = await slack.conversations.list({
+      exclude_archived: true,
+      types: 'private_channel',
+      limit: 200
+    });
+    
+    const allChannels = [...publicChannelsResult.channels, ...privateChannelsResult.channels];
+    
+    console.log(`Found ${publicChannelsResult.channels.length} public channels`);
+    console.log(`Found ${privateChannelsResult.channels.length} private channels bot is member of\n`);
     
     // Look for fireflies-related channels
-    const firefliesChannels = channelsResult.channels.filter(c => 
+    const firefliesChannels = allChannels.filter(c => 
       c.name.toLowerCase().includes('fireflies') || 
-      c.name.toLowerCase().includes('meeting')
+      c.name.toLowerCase().includes('meeting') ||
+      c.name.toLowerCase().includes('ai')
     );
     
     if (firefliesChannels.length > 0) {
-      console.log('🔥 Fireflies-related channels found:');
+      console.log('🔥 AI/Fireflies/Meeting-related channels found:');
       firefliesChannels.forEach(c => {
-        console.log(`  - #${c.name} (ID: ${c.id}, Members: ${c.num_members || 'N/A'})`);
+        const type = c.is_private ? '🔒 Private' : '📢 Public';
+        const member = c.is_member ? '✅ Member' : '❌ Not Member';
+        console.log(`  ${type} #${c.name} - ${member} (ID: ${c.id})`);
       });
     } else {
-      console.log('⚠️  No channels with "fireflies" or "meeting" in the name found');
+      console.log('⚠️  No channels with "fireflies", "meeting", or "ai" in the name found');
     }
     
     // 4. Check if specific fireflies-ai channel exists
     console.log('\n🎯 Looking for #fireflies-ai channel...');
-    const targetChannel = channelsResult.channels.find(c => c.name === 'fireflies-ai');
+    const targetChannel = allChannels.find(c => c.name === 'fireflies-ai');
     
     if (targetChannel) {
       console.log(`✅ Channel #fireflies-ai exists (ID: ${targetChannel.id})`);
+      console.log(`   Type: ${targetChannel.is_private ? '🔒 Private' : '📢 Public'}`);
       
-      // Check if bot is a member
-      const membership = await slack.conversations.info({
-        channel: targetChannel.id
-      });
-      
-      if (membership.channel.is_member) {
-        console.log('✅ Bot is a member of #fireflies-ai');
+      if (targetChannel.is_member) {
+        console.log('✅ Bot IS a member of #fireflies-ai');
+        
+        // Try to get a message from the channel
+        try {
+          const testMessages = await slack.conversations.history({
+            channel: targetChannel.id,
+            limit: 1
+          });
+          console.log('✅ Bot can read messages from #fireflies-ai');
+        } catch (msgError) {
+          console.log('❌ Bot cannot read messages from #fireflies-ai');
+          console.log('   Error:', msgError.data?.error || msgError.message);
+        }
       } else {
         console.log('❌ Bot is NOT a member of #fireflies-ai');
         console.log('   Action: Invite the bot to the channel');
@@ -68,27 +91,53 @@ async function testSlackSetup() {
     } else {
       console.log('❌ Channel #fireflies-ai does not exist or bot cannot see it');
       console.log('\n📝 Suggested actions:');
-      console.log('   1. Create a channel named "fireflies-ai" in Slack');
-      console.log('   2. Invite your bot to the channel');
+      console.log('   1. If #fireflies-ai is a PRIVATE channel:');
+      console.log('      - Go to the #fireflies-ai channel in Slack');
+      console.log('      - Type: /invite @' + auth.user);
+      console.log('      - Or add the bot as a member in channel settings');
+      console.log('   2. If #fireflies-ai doesn\'t exist:');
+      console.log('      - Create a channel named "fireflies-ai" in Slack');
+      console.log('      - Make it private if needed');
+      console.log('      - Invite the bot to the channel');
       console.log('   3. Configure Fireflies to send notifications to this channel');
     }
     
     // 5. List all channels for reference
-    console.log('\n📊 All available channels:');
-    channelsResult.channels.forEach(c => {
-      const memberStatus = c.is_member ? '✅' : '❌';
+    console.log('\n📊 All channels visible to bot:');
+    console.log('\nPUBLIC CHANNELS:');
+    publicChannelsResult.channels.forEach(c => {
+      const memberStatus = c.is_member ? '✅ Member' : '❌ Not Member';
       console.log(`  ${memberStatus} #${c.name} (${c.num_members || 0} members)`);
     });
     
-    // 6. Check bot permissions
-    console.log('\n🔐 Checking bot permissions...');
-    if (auth.ok) {
-      console.log('Bot has the following OAuth scopes:');
-      const scopes = process.env.SLACK_BOT_TOKEN.startsWith('xoxb-') 
-        ? ['channels:history', 'channels:read', 'chat:write', 'users:read']
-        : ['Unknown - check Slack App settings'];
-      scopes.forEach(scope => console.log(`  - ${scope}`));
+    if (privateChannelsResult.channels.length > 0) {
+      console.log('\nPRIVATE CHANNELS (bot is member):');
+      privateChannelsResult.channels.forEach(c => {
+        console.log(`  ✅ Member 🔒 #${c.name} (${c.num_members || 0} members)`);
+      });
+    } else {
+      console.log('\n⚠️  Bot is not a member of any private channels');
     }
+    
+    // 6. Check bot permissions/scopes
+    console.log('\n🔐 Required OAuth Scopes for full functionality:');
+    const requiredScopes = {
+      'channels:history': 'Read public channel messages',
+      'channels:read': 'View public channels',
+      'groups:history': 'Read private channel messages',
+      'groups:read': 'View private channels bot is in',
+      'chat:write': 'Send messages',
+      'users:read': 'View user information'
+    };
+    
+    for (const [scope, description] of Object.entries(requiredScopes)) {
+      console.log(`  - ${scope}: ${description}`);
+    }
+    
+    console.log('\n💡 If bot cannot see private channels:');
+    console.log('   1. Add "groups:read" and "groups:history" scopes in Slack App settings');
+    console.log('   2. Reinstall the app to workspace after adding scopes');
+    console.log('   3. Invite the bot to private channels manually');
     
   } catch (error) {
     console.error('\n❌ Error testing Slack:', error.message);
@@ -98,9 +147,11 @@ async function testSlackSetup() {
       console.log('   1. Check if SLACK_BOT_TOKEN in .env is correct');
       console.log('   2. Make sure the token starts with "xoxb-"');
       console.log('   3. Regenerate the token in Slack App settings if needed');
-    } else if (error.data && error.data.error === 'not_in_channel') {
-      console.log('\n⚠️  Bot is not in the required channel');
-      console.log('   Invite the bot to the channel first');
+    } else if (error.data && error.data.error === 'missing_scope') {
+      console.log('\n⚠️  Bot is missing required permissions');
+      console.log('   1. Go to your Slack App settings');
+      console.log('   2. Add the required OAuth scopes listed above');
+      console.log('   3. Reinstall the app to your workspace');
     } else {
       console.log('\nFull error:', error);
     }
