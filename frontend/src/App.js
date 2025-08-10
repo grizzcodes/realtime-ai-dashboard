@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import io from 'socket.io-client';
-import { Send, MessageCircle, Users, Clock, RotateCcw, ChevronDown } from 'lucide-react';
+import { Send, MessageCircle, Users, Clock, RotateCcw, ChevronDown, Calendar, Plus } from 'lucide-react';
 import MagicInbox from './components/MagicInbox';
 import SupaDashboard from './components/SupaDashboard';
 import './App.css';
@@ -11,11 +11,12 @@ const App = () => {
   const [filteredNotionTasks, setFilteredNotionTasks] = useState([]);
   const [emails, setEmails] = useState([]);
   const [meetings, setMeetings] = useState([]);
+  const [calendarEvents, setCalendarEvents] = useState([]);
   const [isConnected, setIsConnected] = useState(false);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [apiStatus, setApiStatus] = useState({});
   const [showIntegrations, setShowIntegrations] = useState(false);
-  const [darkMode, setDarkMode] = useState(false);
+  const [darkMode, setDarkMode] = useState(true); // DEFAULT TO DARK MODE
   const [chatMessages, setChatMessages] = useState([]);
   const [chatInput, setChatInput] = useState('');
   const [isAITyping, setIsAITyping] = useState(false);
@@ -24,25 +25,64 @@ const App = () => {
   const [showPersonDropdown, setShowPersonDropdown] = useState(false);
   const [isLoadingNotion, setIsLoadingNotion] = useState(false);
   const [isLoadingEmails, setIsLoadingEmails] = useState(false);
+  const [isLoadingCalendar, setIsLoadingCalendar] = useState(false);
+  const [isLoadingMeetings, setIsLoadingMeetings] = useState(false);
+  const [pushingToNotion, setPushingToNotion] = useState({});
+  const [availableTeamMembers, setAvailableTeamMembers] = useState(['All']);
 
-  const teamMembers = ['All', 'Alec', 'Leo', 'Steph', 'Pablo', 'Alexa'];
+  // Use useMemo to prevent recreating on every render
+  const teamMembers = useMemo(() => ['All', 'Alec', 'Leo', 'Steph', 'Pablo', 'Alexa', 'Anthony', 'Dany', 'Mathieu'], []);
+
+  const loadNotionTasks = useCallback(async () => {
+    setIsLoadingNotion(true);
+    try {
+      const response = await fetch('http://localhost:3001/api/notion/tasks');
+      const data = await response.json();
+      
+      // Filter out completed tasks and properly map assignee
+      const pendingTasks = (data.tasks || [])
+        .filter(task => task.status !== 'completed' && task.status !== 'Done')
+        .map(task => ({
+          ...task,
+          // Use assignee from backend (not assignedTo) and DON'T override with random
+          assignedTo: task.assignee || task.assignedTo || 'Unassigned',
+          dueDate: task.dueDate || task.deadline || null
+        }));
+      
+      // Extract unique assignees from actual Notion data
+      const uniqueAssignees = [...new Set(pendingTasks
+        .map(t => t.assignedTo)
+        .filter(a => a && a !== 'Unassigned')
+      )];
+      
+      // Update available team members with actual Notion users
+      setAvailableTeamMembers(['All', ...uniqueAssignees.sort()]);
+      
+      setNotionTasks(pendingTasks);
+    } catch (error) {
+      console.error('Failed to load Notion tasks:', error);
+    } finally {
+      setIsLoadingNotion(false);
+    }
+  }, []);
 
   useEffect(() => {
     const socket = io('http://localhost:3001');
     socket.on('connect', () => setIsConnected(true));
     socket.on('disconnect', () => setIsConnected(false));
     
-    loadTasks();
     loadNotionTasks();
     loadEmails();
     loadMeetings();
+    loadCalendarEvents();
     loadApiStatus();
     
-    const savedDarkMode = localStorage.getItem('darkMode') === 'true';
-    setDarkMode(savedDarkMode);
+    // Check for saved dark mode preference, default to true
+    const savedDarkMode = localStorage.getItem('darkMode');
+    setDarkMode(savedDarkMode !== 'false'); // Default to true unless explicitly set to false
     
     return () => socket.close();
-  }, []);
+  }, [loadNotionTasks]);
 
   useEffect(() => {
     if (darkMode) {
@@ -64,39 +104,6 @@ const App = () => {
     }
   }, [notionTasks, selectedPerson]);
 
-  const loadTasks = async () => {
-    try {
-      const response = await fetch('http://localhost:3001/api/tasks');
-      const data = await response.json();
-      setTasks(data.tasks || []);
-    } catch (error) {
-      console.error('Failed to load tasks:', error);
-    }
-  };
-
-  const loadNotionTasks = async () => {
-    setIsLoadingNotion(true);
-    try {
-      const response = await fetch('http://localhost:3001/api/notion/tasks');
-      const data = await response.json();
-      
-      // Filter out completed tasks and add mock data for demo
-      const pendingTasks = (data.tasks || [])
-        .filter(task => task.status !== 'completed' && task.status !== 'Done')
-        .map(task => ({
-          ...task,
-          assignedTo: task.assignedTo || teamMembers[Math.floor(Math.random() * (teamMembers.length - 1)) + 1],
-          dueDate: task.dueDate || new Date(Date.now() + Math.random() * 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
-        }));
-      
-      setNotionTasks(pendingTasks);
-    } catch (error) {
-      console.error('Failed to load Notion tasks:', error);
-    } finally {
-      setIsLoadingNotion(false);
-    }
-  };
-
   const loadEmails = async () => {
     setIsLoadingEmails(true);
     try {
@@ -110,7 +117,6 @@ const App = () => {
     }
   };
 
-  // ADD: Archive email function
   const archiveEmail = async (emailId) => {
     try {
       const response = await fetch(`http://localhost:3001/api/gmail/archive/${emailId}`, {
@@ -119,7 +125,6 @@ const App = () => {
       });
       
       if (response.ok) {
-        // Remove email from the list
         setEmails(prev => prev.filter(e => e.id !== emailId));
         console.log('Email archived successfully');
       } else {
@@ -130,7 +135,6 @@ const App = () => {
     }
   };
 
-  // ADD: Generate draft reply function
   const generateDraftReply = async (email) => {
     try {
       const response = await fetch('http://localhost:3001/api/gmail/draft-reply', {
@@ -147,7 +151,6 @@ const App = () => {
       const data = await response.json();
       
       if (data.success) {
-        // Show the draft
         alert(`Draft Reply Generated:\n\n${data.draftContent}`);
       } else {
         console.error('Failed to generate draft');
@@ -158,9 +161,24 @@ const App = () => {
   };
 
   const loadMeetings = async () => {
+    setIsLoadingMeetings(true);
     try {
+      // First try Slack Fireflies (real meetings from Slack)
+      const slackResponse = await fetch('http://localhost:3001/api/slack-fireflies/meetings');
+      const slackData = await slackResponse.json();
+      
+      console.log('Slack Fireflies response:', slackData);
+      
+      if (slackData.success && slackData.meetings && slackData.meetings.length > 0) {
+        console.log('Loading REAL meetings from Slack:', slackData.meetings.length);
+        setMeetings(slackData.meetings);
+        return;
+      }
+      
+      // Fallback to regular Fireflies API
       const response = await fetch('http://localhost:3001/api/fireflies/meetings');
       const data = await response.json();
+      console.log('Fireflies API meetings:', data.meetings);
       setMeetings(data.meetings || []);
     } catch (error) {
       console.error('Failed to load meetings:', error);
@@ -172,6 +190,7 @@ const App = () => {
           date: new Date().toISOString(),
           duration: '30m',
           attendees: 5,
+          summary: 'Discussed sprint progress, blockers, and upcoming deadlines. Team is on track for release.',
           actionItems: ['Review sprint goals', 'Update client on progress', 'Schedule design review']
         },
         {
@@ -180,9 +199,75 @@ const App = () => {
           date: new Date(Date.now() - 24*60*60*1000).toISOString(),
           duration: '45m',
           attendees: 3,
+          summary: 'Initial discovery call with TechCorp to understand their requirements for the new platform.',
           actionItems: ['Send proposal draft', 'Schedule technical demo']
         }
       ]);
+    } finally {
+      setIsLoadingMeetings(false);
+    }
+  };
+
+  const loadCalendarEvents = async () => {
+    setIsLoadingCalendar(true);
+    try {
+      const response = await fetch('http://localhost:3001/api/calendar/next-meetings?limit=5');
+      const data = await response.json();
+      
+      if (data.success && data.meetings) {
+        // Transform the calendar data to match our frontend format
+        const events = data.meetings.map(meeting => ({
+          id: meeting.id,
+          title: meeting.title,
+          startTime: meeting.start,
+          endTime: meeting.end,
+          attendees: meeting.attendees?.map(a => a.name || a.email) || [],
+          location: meeting.location,
+          meetLink: meeting.meetLink,
+          allDay: meeting.allDay
+        }));
+        setCalendarEvents(events);
+      } else {
+        // Use fallback data if the API call fails
+        console.log('Calendar API returned no data, using fallback');
+        setCalendarEvents([
+          {
+            id: 'cal-1',
+            title: 'Product Launch Review',
+            startTime: new Date(Date.now() + 2*60*60*1000).toISOString(),
+            endTime: new Date(Date.now() + 3*60*60*1000).toISOString(),
+            attendees: ['Alec', 'Leo', 'Steph']
+          },
+          {
+            id: 'cal-2',
+            title: 'Client Onboarding',
+            startTime: new Date(Date.now() + 24*60*60*1000).toISOString(),
+            endTime: new Date(Date.now() + 25*60*60*1000).toISOString(),
+            attendees: ['Pablo', 'Alexa']
+          }
+        ]);
+      }
+    } catch (error) {
+      console.error('Failed to load calendar events:', error);
+      // Use fallback data
+      setCalendarEvents([
+        {
+          id: 'cal-1',
+          title: 'Product Launch Review',
+          startTime: new Date(Date.now() + 2*60*60*1000).toISOString(),
+          endTime: new Date(Date.now() + 3*60*60*1000).toISOString(),
+          attendees: ['Alec', 'Leo', 'Steph']
+        },
+        {
+          id: 'cal-2',
+          title: 'Client Onboarding',
+          startTime: new Date(Date.now() + 24*60*60*1000).toISOString(),
+          endTime: new Date(Date.now() + 25*60*60*1000).toISOString(),
+          attendees: ['Pablo', 'Alexa']
+        }
+      ]);
+    } finally {
+      setIsLoadingCalendar(false);
     }
   };
 
@@ -193,6 +278,88 @@ const App = () => {
       setApiStatus(data.integrations || {});
     } catch (error) {
       console.error('Failed to load API status:', error);
+    }
+  };
+
+  // Push action item to Notion (UPDATED to handle assignee from action item)
+  const pushActionItemToNotion = async (actionItem, meeting, index) => {
+    // Extract the task text and assignee
+    let taskText = '';
+    let assignee = 'Team';
+    
+    if (typeof actionItem === 'object' && actionItem.task) {
+      // New format with assignee
+      taskText = actionItem.task;
+      assignee = actionItem.assignee || 'Team';
+    } else {
+      // Old format (just text)
+      taskText = actionItem;
+    }
+    
+    // Quick edit popup
+    const editedText = prompt("Edit task before sending to Notion:", taskText);
+    if (!editedText) return;
+    
+    // Keep the assignee from the action item or auto-detect from edited text
+    if (assignee === 'Team') {
+      teamMembers.slice(1).forEach(member => {
+        if (editedText.toLowerCase().includes(member.toLowerCase())) {
+          assignee = member;
+        }
+      });
+    }
+    
+    // Auto-detect priority
+    let priority = "Medium";
+    if (editedText.match(/urgent|asap|immediately|critical/i)) {
+      priority = "Urgent";
+    } else if (editedText.match(/important|priority|soon/i)) {
+      priority = "High";
+    } else if (editedText.match(/later|eventually|consider/i)) {
+      priority = "Low";
+    }
+    
+    // Set a due date (default to 1 week from now)
+    const dueDate = new Date();
+    if (editedText.match(/today/i)) {
+      // Keep today
+    } else if (editedText.match(/tomorrow/i)) {
+      dueDate.setDate(dueDate.getDate() + 1);
+    } else if (editedText.match(/this week/i)) {
+      dueDate.setDate(dueDate.getDate() + 7);
+    } else {
+      dueDate.setDate(dueDate.getDate() + 7); // Default 1 week
+    }
+    
+    // Set loading state
+    setPushingToNotion(prev => ({ ...prev, [`${meeting.id}-${index}`]: true }));
+    
+    try {
+      const response = await fetch('http://localhost:3001/api/notion/tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: editedText,
+          assignee: assignee,
+          priority: priority,
+          dueDate: dueDate.toISOString().split('T')[0],
+          source: `Fireflies: ${meeting.title}`,
+          meetingUrl: meeting.firefliesUrl || meeting.meetingUrl || '#'
+        })
+      });
+      
+      if (response.ok) {
+        alert(`✅ Added to Notion!\n\nTask: ${editedText}\nAssigned to: ${assignee}\nPriority: ${priority}`);
+        // Reload Notion tasks to show the new one
+        loadNotionTasks();
+      } else {
+        alert('❌ Failed to add to Notion. Check your integration.');
+      }
+    } catch (error) {
+      console.error('Error pushing to Notion:', error);
+      alert('❌ Error connecting to Notion');
+    } finally {
+      setPushingToNotion(prev => ({ ...prev, [`${meeting.id}-${index}`]: false }));
     }
   };
 
@@ -257,7 +424,6 @@ const App = () => {
       });
       const result = await response.json();
       console.log('AI Test Result:', result);
-      loadTasks();
       loadNotionTasks();
     } catch (error) {
       console.error('AI test failed:', error);
@@ -272,7 +438,6 @@ const App = () => {
       });
       const result = await response.json();
       if (result.success) {
-        loadTasks();
         loadNotionTasks();
       }
     } catch (error) {
@@ -412,7 +577,7 @@ const App = () => {
                 <div className="flex items-center gap-3">
                   <span className="text-2xl">📝</span>
                   
-                  {/* Person Dropdown */}
+                  {/* Person Dropdown - now shows actual team members from Notion */}
                   <div className="relative">
                     <button
                       onClick={() => setShowPersonDropdown(!showPersonDropdown)}
@@ -424,7 +589,7 @@ const App = () => {
                     
                     {showPersonDropdown && (
                       <div className="absolute top-full left-0 mt-1 w-32 glass rounded-lg overflow-hidden z-50">
-                        {teamMembers.map(person => (
+                        {availableTeamMembers.map(person => (
                           <button
                             key={person}
                             onClick={() => {
@@ -494,72 +659,167 @@ const App = () => {
               )}
             </div>
 
-            {/* Middle Column - Fireflies Meetings */}
-            <div className="card-glass p-6 animate-fade-in">
-              <div className="flex justify-between items-center mb-4">
-                <h2 className="text-xl font-bold text-glow">🎙️ Meetings ({meetings.length})</h2>
-                <button
-                  onClick={loadMeetings}
-                  className="btn-glass text-sm px-3 py-1 rounded"
-                >
-                  🔄
-                </button>
-              </div>
-              {meetings.length === 0 ? (
-                <p className="opacity-70">
-                  No meetings found. Check your Fireflies integration.
-                </p>
-              ) : (
-                <div className="space-y-3 max-h-96 overflow-y-auto">
-                  {meetings.map(meeting => (
-                    <div key={meeting.id} className="task-card">
-                      <div className="mb-3">
-                        <h4 className="font-medium text-sm line-clamp-2">{meeting.title}</h4>
-                        <div className="flex items-center gap-4 mt-2 text-xs opacity-70">
-                          <div className="flex items-center gap-1">
-                            <Users size={12} />
-                            <span>{meeting.attendees || 0} attendees</span>
-                          </div>
-                          <div className="flex items-center gap-1">
-                            <Clock size={12} />
-                            <span>{meeting.duration || '0m'}</span>
-                          </div>
-                        </div>
-                      </div>
-                      
-                      {meeting.actionItems && meeting.actionItems.length > 0 && (
-                        <div className="mb-3">
-                          <h5 className="text-xs font-medium opacity-80 mb-1">Action Items:</h5>
-                          <div className="space-y-1">
-                            {meeting.actionItems.slice(0, 2).map((item, index) => (
-                              <div key={index} className="text-xs opacity-70 line-clamp-1">
-                                • {item}
-                              </div>
-                            ))}
-                            {meeting.actionItems.length > 2 && (
-                              <div className="text-xs opacity-50">
-                                +{meeting.actionItems.length - 2} more...
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      )}
-                      
-                      <div className="flex justify-between items-center">
-                        <span className="text-xs opacity-60">
-                          {new Date(meeting.date).toLocaleDateString()}
-                        </span>
-                        <button className="btn-glass px-2 py-1 text-xs rounded">
-                          View
-                        </button>
-                      </div>
-                    </div>
-                  ))}
+            {/* Middle Column - Calendar + Fireflies Meetings */}
+            <div className="space-y-6">
+              {/* Calendar Events Box */}
+              <div className="card-glass p-6 animate-fade-in">
+                <div className="flex justify-between items-center mb-4">
+                  <h2 className="text-xl font-bold text-glow flex items-center gap-2">
+                    <Calendar size={20} className="text-blue-400" />
+                    Calendar ({calendarEvents.length})
+                  </h2>
+                  <button
+                    onClick={loadCalendarEvents}
+                    disabled={isLoadingCalendar}
+                    className="btn-glass p-2 rounded-full transition-all"
+                  >
+                    <RotateCcw size={16} className={isLoadingCalendar ? 'animate-spin' : ''} />
+                  </button>
                 </div>
-              )}
+                {calendarEvents.length === 0 ? (
+                  <p className="opacity-70 text-center py-4">
+                    No upcoming events found. Check your Calendar integration.
+                  </p>
+                ) : (
+                  <div className="space-y-3 max-h-48 overflow-y-auto">
+                    {calendarEvents.map(event => (
+                      <div key={event.id} className="task-card">
+                        <h4 className="font-medium text-sm">{event.title}</h4>
+                        <div className="flex items-center justify-between mt-2">
+                          <div className="text-xs opacity-70">
+                            📅 {new Date(event.startTime).toLocaleDateString()} • {new Date(event.startTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                          </div>
+                          {event.attendees && (
+                            <div className="text-xs opacity-60">
+                              {event.attendees.length} attendees
+                            </div>
+                          )}
+                        </div>
+                        {event.meetLink && (
+                          <a href={event.meetLink} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-400 hover:underline mt-1 inline-block">
+                            Join Meeting
+                          </a>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Fireflies Meetings Box from Slack */}
+              <div className="card-glass p-6 animate-fade-in">
+                <div className="flex justify-between items-center mb-4">
+                  <h2 className="text-xl font-bold text-glow">🎙️ Meetings ({meetings.length})</h2>
+                  <button
+                    onClick={loadMeetings}
+                    disabled={isLoadingMeetings}
+                    className="btn-glass p-2 rounded-full transition-all"
+                  >
+                    <RotateCcw size={16} className={isLoadingMeetings ? 'animate-spin' : ''} />
+                  </button>
+                </div>
+                {meetings.length === 0 ? (
+                  <p className="opacity-70">
+                    No meetings found. Check your Slack #fireflies-ai channel.
+                  </p>
+                ) : (
+                  <div className="space-y-3 max-h-64 overflow-y-auto">
+                    {meetings.map(meeting => (
+                      <div key={meeting.id} className="task-card">
+                        <div className="mb-3">
+                          <h4 className="font-medium text-sm line-clamp-2">{meeting.title}</h4>
+                          <div className="flex items-center gap-4 mt-2 text-xs opacity-70">
+                            <div className="flex items-center gap-1">
+                              <Users size={12} />
+                              <span>{meeting.attendees || 0} attendees</span>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <Clock size={12} />
+                              <span>{meeting.duration || '0m'}</span>
+                            </div>
+                          </div>
+                        </div>
+                        
+                        {(meeting.summary || meeting.gist || meeting.overview) && (
+                          <div className="mb-3">
+                            <h5 className="text-xs font-medium opacity-80 mb-1">Summary:</h5>
+                            <p className="text-xs opacity-70 line-clamp-3">
+                              {meeting.summary || meeting.gist || meeting.overview}
+                            </p>
+                          </div>
+                        )}
+                        
+                        {meeting.actionItems && meeting.actionItems.length > 0 && (
+                          <div className="mb-3">
+                            <h5 className="text-xs font-medium opacity-80 mb-1">Action Items:</h5>
+                            <div className="space-y-1">
+                              {meeting.actionItems.slice(0, 3).map((item, index) => {
+                                // Handle both object format (with assignee) and string format
+                                const taskText = typeof item === 'object' ? item.task : item;
+                                const assignee = typeof item === 'object' ? item.assignee : null;
+                                
+                                return (
+                                  <div key={index} className="flex items-center gap-2">
+                                    <div className="flex-1">
+                                      <p className="text-xs opacity-70 line-clamp-1">
+                                        • {taskText}
+                                      </p>
+                                      {assignee && (
+                                        <span className="text-xs opacity-50 ml-3">
+                                          👤 {assignee}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <button
+                                      onClick={() => pushActionItemToNotion(item, meeting, index)}
+                                      disabled={pushingToNotion[`${meeting.id}-${index}`]}
+                                      className="btn-glass px-2 py-0.5 text-xs rounded flex items-center gap-1"
+                                      title="Push to Notion"
+                                    >
+                                      {pushingToNotion[`${meeting.id}-${index}`] ? (
+                                        <div className="loading-spinner border-white w-3 h-3"></div>
+                                      ) : (
+                                        <>
+                                          <Plus size={10} />
+                                          Notion
+                                        </>
+                                      )}
+                                    </button>
+                                  </div>
+                                );
+                              })}
+                              {meeting.actionItems.length > 3 && (
+                                <div className="text-xs opacity-50">
+                                  +{meeting.actionItems.length - 3} more...
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                        
+                        <div className="flex justify-between items-center">
+                          <span className="text-xs opacity-60">
+                            {new Date(meeting.date).toLocaleDateString()}
+                          </span>
+                          {meeting.firefliesUrl && meeting.firefliesUrl !== '#' && (
+                            <a 
+                              href={meeting.firefliesUrl || meeting.meetingUrl} 
+                              target="_blank" 
+                              rel="noopener noreferrer"
+                              className="btn-glass px-2 py-1 text-xs rounded"
+                            >
+                              View
+                            </a>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
 
-            {/* Right Column - Emails WITH BUTTONS */}
+            {/* Right Column - Emails */}
             <div className="card-glass p-6 animate-fade-in">
               <div className="flex justify-between items-center mb-4">
                 <h2 className="text-xl font-bold text-glow">📧 Gmail ({emails.length})</h2>
@@ -576,7 +836,7 @@ const App = () => {
                   No emails found. Check your Gmail integration.
                 </p>
               ) : (
-                <div className="space-y-3 max-h-96 overflow-y-auto">
+                <div className="space-y-3 max-h-[600px] overflow-y-auto">
                   {emails.map(email => (
                     <div key={email.id} className="task-card">
                       <div className="flex justify-between items-start">
@@ -589,7 +849,6 @@ const App = () => {
                             {email.snippet}
                           </p>
                         </div>
-                        {/* UPDATED: Added archive and draft buttons */}
                         <div className="flex gap-1">
                           <button 
                             onClick={() => archiveEmail(email.id)}
