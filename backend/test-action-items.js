@@ -117,15 +117,57 @@ async function debugActionItems() {
                 block.elements.forEach((element, idx) => {
                   console.log(`   Element ${idx}: type=${element.type}`);
                   
-                  if (element.type === 'button' && element.text) {
+                  // Handle checkboxes (Fireflies uses these for action items)
+                  if (element.type === 'checkboxes') {
+                    console.log(`     Checkboxes element found`);
+                    
+                    // Check if options exist
+                    if (element.options && Array.isArray(element.options)) {
+                      console.log(`     - Has ${element.options.length} options`);
+                      
+                      element.options.forEach((option, optIdx) => {
+                        console.log(`       Option ${optIdx}:`);
+                        
+                        // Extract text from option
+                        let taskText = '';
+                        if (option.text) {
+                          if (typeof option.text === 'string') {
+                            taskText = option.text;
+                          } else if (option.text.text) {
+                            taskText = option.text.text;
+                          }
+                        } else if (option.value) {
+                          taskText = option.value;
+                        }
+                        
+                        console.log(`         Text: "${taskText}"`);
+                        console.log(`         Value: "${option.value || 'none'}"`);
+                        
+                        if (taskText.trim()) {
+                          tasks.push(taskText.trim());
+                        }
+                      });
+                    } else {
+                      console.log(`     - No options found`);
+                      // Debug: show all properties of the checkbox element
+                      console.log(`     - Element properties: ${Object.keys(element).join(', ')}`);
+                    }
+                  }
+                  
+                  // Also handle buttons (in case format varies)
+                  else if (element.type === 'button' && element.text) {
                     const taskText = element.text.text || element.text.value || '';
                     console.log(`     - Button text: "${taskText}"`);
                     
                     if (taskText.trim()) {
                       tasks.push(taskText.trim());
                     }
-                  } else if (element.text) {
-                    console.log(`     - Other element text: "${element.text}"`);
+                  }
+                  
+                  // Debug: show unknown element types
+                  else {
+                    console.log(`     - Unknown element type: ${element.type}`);
+                    console.log(`     - Properties: ${Object.keys(element).join(', ')}`);
                   }
                 });
                 
@@ -157,24 +199,16 @@ async function debugActionItems() {
           } else {
             console.log('❌ No action items could be parsed');
             
-            // Show all blocks for debugging
-            console.log('\nDEBUG - All blocks in action section:');
+            // Deep debug - show full structure of action blocks
+            console.log('\nDEEP DEBUG - Full structure of action blocks:');
             let inAction = false;
             message.blocks.forEach((block, i) => {
               if (block.text?.text?.includes('*Action Items:*')) {
                 inAction = true;
               }
-              if (inAction) {
-                console.log(`\nBlock ${i} (${block.type}):`);
-                if (block.text) {
-                  console.log(`  Text: "${block.text.text?.substring(0, 100)}"`);
-                }
-                if (block.elements) {
-                  console.log(`  Elements: ${block.elements.length}`);
-                  block.elements.forEach((el, j) => {
-                    console.log(`    ${j}: ${el.type} - ${el.text?.text || el.text || 'no text'}`);
-                  });
-                }
+              if (inAction && block.type === 'actions') {
+                console.log(`\nBlock ${i} full structure:`);
+                console.log(JSON.stringify(block, null, 2));
               }
               if (inAction && block.type === 'divider') {
                 inAction = false;
