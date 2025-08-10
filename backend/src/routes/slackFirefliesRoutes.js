@@ -4,6 +4,53 @@ const { WebClient } = require('@slack/web-api');
 // Initialize Slack client
 const slack = new WebClient(process.env.SLACK_BOT_TOKEN);
 
+// Helper function to extract meeting title from Fireflies URL or text
+function extractMeetingTitle(message) {
+  const text = message.text || '';
+  
+  // Try multiple patterns to find the meeting title
+  // Pattern 1: Look for "Meeting: [title]" or "Title: [title]"
+  let titleMatch = text.match(/(?:Meeting|Title|Subject):\s*(.+?)(?:\n|$)/i);
+  if (titleMatch) return titleMatch[1].trim();
+  
+  // Pattern 2: Look for meeting name in URL (mtm-jsvm-pqk format)
+  const urlMatch = text.match(/(?:fireflies\.ai\/view|app\.fireflies\.ai\/view)\/([a-z]+-[a-z]+-[a-z]+)/i);
+  if (urlMatch) {
+    // Convert URL slug to readable format: mtm-jsvm-pqk -> Mtm Jsvm Pqk
+    const meetingCode = urlMatch[1];
+    
+    // Check if there's a cleaner title nearby in the text
+    const lines = text.split('\n');
+    for (const line of lines) {
+      // Skip lines that are URLs or look like metadata
+      if (!line.includes('http') && !line.includes('fireflies') && line.length > 5 && line.length < 100) {
+        // This might be the title
+        if (!line.includes(':') || line.startsWith('Meeting:') || line.startsWith('Title:')) {
+          const cleanTitle = line.replace(/^(Meeting|Title|Subject):\s*/i, '').trim();
+          if (cleanTitle) return cleanTitle;
+        }
+      }
+    }
+    
+    // If no clean title found, use the meeting code
+    return `Meeting ${meetingCode}`;
+  }
+  
+  // Pattern 3: First non-empty line that's not a URL
+  const lines = text.split('\n').filter(line => line.trim());
+  for (const line of lines) {
+    if (!line.includes('http') && !line.includes('fireflies') && line.length > 5) {
+      return line.trim();
+    }
+  }
+  
+  // Pattern 4: Look for "Your meeting recap" subject pattern
+  const recapMatch = text.match(/Your meeting recap[:\s-]+(.+?)(?:\n|$)/i);
+  if (recapMatch) return recapMatch[1].trim();
+  
+  return 'Meeting Summary';
+}
+
 // Get Fireflies meetings from Slack channel
 async function getSlackFirefliesMeetings(req, res) {
   try {
@@ -98,8 +145,10 @@ async function getSlackFirefliesMeetings(req, res) {
       // Look for Fireflies bot messages with meeting summaries
       // Fireflies messages typically come from a bot or have specific formatting
       if ((message.bot_id || message.subtype === 'bot_message') && message.text) {
+        // Extract meeting title intelligently
+        const title = extractMeetingTitle(message);
+        
         // Parse meeting information from various Fireflies formats
-        const titleMatch = message.text.match(/(?:Meeting|Title|Subject):\s*(.+?)(?:\n|$)/i);
         const durationMatch = message.text.match(/Duration:\s*(\d+)\s*(?:min|minutes)/i);
         const dateMatch = message.text.match(/(?:Date|When):\s*(.+?)(?:\n|$)/i);
         const attendeesMatch = message.text.match(/(?:Attendees|Participants):\s*(.+?)(?:\n|$)/i);
@@ -111,20 +160,20 @@ async function getSlackFirefliesMeetings(req, res) {
           message.text.includes('Fireflies') ||
           message.text.includes('fireflies.ai') ||
           message.text.includes('Meeting Summary') ||
+          message.text.includes('meeting recap') ||
           message.text.includes('Transcript') ||
-          (titleMatch || summaryMatch || actionItemsMatch);
+          (summaryMatch || actionItemsMatch);
         
         if (isFirefliesMessage) {
           const meeting = {
             id: message.ts,
-            title: titleMatch ? titleMatch[1].trim() : 'Meeting Summary',
+            title: title, // Use the intelligently extracted title
             date: dateMatch ? dateMatch[1].trim() : new Date(parseFloat(message.ts) * 1000).toISOString(),
             duration: durationMatch ? `${durationMatch[1]}m` : 'N/A',
             attendees: 0,
             summary: summaryMatch ? summaryMatch[1].trim() : '',
             actionItems: [],
-            source: 'slack-fireflies',
-            rawText: message.text.substring(0, 200) + '...' // For debugging
+            source: 'slack-fireflies'
           };
 
           // Parse attendees
