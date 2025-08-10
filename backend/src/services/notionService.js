@@ -1,156 +1,61 @@
-// backend/src/services/notionService.js
+// backend/src/services/notionService.js - Fixed for your database structure
 const { Client } = require('@notionhq/client');
 
 class NotionService {
   constructor() {
-    this.notion = process.env.NOTION_API_KEY ? new Client({
-      auth: process.env.NOTION_API_KEY,
-    }) : null;
-    this.databaseId = process.env.NOTION_DATABASE_ID || null;
+    this.notion = null;
+    this.databaseId = process.env.NOTION_DATABASE_ID || '4edf1722-ef48-4cbc-988d-ed770d281f9b';
     this.statusOptions = [];
+    
+    if (process.env.NOTION_API_KEY) {
+      this.notion = new Client({
+        auth: process.env.NOTION_API_KEY,
+      });
+      console.log('✅ NotionService initialized with API key');
+    } else {
+      console.log('⚠️ NotionService: No API key found');
+    }
   }
 
   async testConnection() {
     if (!this.notion) {
       return { 
         success: false, 
-        error: 'Notion not configured. Add NOTION_API_KEY to .env',
-        needsAuth: true
+        error: 'Notion API key not configured' 
       };
     }
 
     try {
       const response = await this.notion.users.me();
-      return { 
-        success: true, 
-        message: `Connected: ${response.name}`,
-        user: response 
-      };
-    } catch (error) {
-      return { 
-        success: false, 
-        error: `Notion failed: ${error.message}`
-      };
-    }
-  }
-
-  async getFilteredTasks(person, status) {
-    try {
-      const result = await this.getTasks();
       
-      if (!result.success) {
-        return result;
-      }
-
-      let filteredTasks = result.tasks;
-
-      // Filter by person if specified
-      if (person && person !== 'all') {
-        filteredTasks = filteredTasks.filter(task => 
-          task.keyPeople.some(p => p.toLowerCase().includes(person.toLowerCase()))
-        );
-      }
-
-      // Filter by status if specified
-      if (status && status !== 'all') {
-        filteredTasks = filteredTasks.filter(task => task.status === status);
-      }
-
-      // Extract unique people and status options
-      const people = [...new Set(result.tasks.flatMap(task => task.keyPeople))];
-      const statusOptionsFromTasks = [...new Set(result.tasks.map(task => task.status))];
-
-      return {
-        success: true,
-        tasks: filteredTasks,
-        people: people.sort(),
-        statusOptions: statusOptionsFromTasks.sort(),
-        filters: { person, status },
-        summary: {
-          total: filteredTasks.length,
-          filtered: person || status ? true : false
-        }
-      };
-    } catch (error) {
-      console.error('❌ Failed to get filtered tasks:', error);
-      return {
-        success: false,
-        error: error.message,
-        tasks: []
-      };
-    }
-  }
-
-  async getStatusOptions() {
-    if (!this.notion || !this.databaseId) {
-      return [];
-    }
-
-    try {
-      const dbInfo = await this.notion.databases.retrieve({
+      // Also test database access
+      const database = await this.notion.databases.retrieve({
         database_id: this.databaseId
       });
-
-      const statusProperty = dbInfo.properties['Status'];
-      if (statusProperty && statusProperty.type === 'status') {
-        this.statusOptions = statusProperty.status.options.map(option => ({
-          name: option.name,
-          color: option.color,
-          id: option.id
-        }));
-        return this.statusOptions;
-      }
-      return [];
+      
+      return {
+        success: true,
+        message: `Connected to Notion database: ${database.title[0]?.plain_text || 'Untitled'}`,
+        databaseId: this.databaseId
+      };
     } catch (error) {
-      console.error('Failed to get status options:', error);
-      return [];
+      return {
+        success: false,
+        error: error.message
+      };
     }
   }
 
   async getTasks() {
     if (!this.notion) {
-      return { success: false, error: 'Notion not configured - add NOTION_API_KEY to .env' };
-    }
-
-    if (!this.databaseId) {
-      return { success: false, error: 'Database ID not set - add NOTION_DATABASE_ID=4edf1722-ef48-4cbc-988d-ed770d281f9b to .env' };
+      return { success: false, error: 'Notion not configured' };
     }
 
     try {
       console.log(`📝 Querying Notion database: ${this.databaseId}`);
       
-      // Get database info and status options
-      let dbInfo;
-      try {
-        dbInfo = await this.notion.databases.retrieve({
-          database_id: this.databaseId
-        });
-        console.log(`✅ Database found: "${dbInfo.title[0]?.plain_text || 'Untitled'}"`);
-        
-        // Get status options
-        const statusProperty = dbInfo.properties['Status'];
-        if (statusProperty && statusProperty.type === 'status') {
-          this.statusOptions = statusProperty.status.options.map(option => ({
-            name: option.name,
-            color: option.color,
-            id: option.id
-          }));
-        }
-        
-      } catch (dbError) {
-        console.error('❌ Database access error:', dbError.message);
-        if (dbError.code === 'object_not_found') {
-          return { 
-            success: false, 
-            error: `Database not found! Steps to fix: 1) Check Database ID: ${this.databaseId} 2) Share database with integration at https://www.notion.so/my-integrations 3) Click "Add connections" in your database`
-          };
-        }
-        throw dbError;
-      }
-      
-      // Fetch NOT DONE tasks with filters matching your Notion setup
-      console.log('📋 Fetching NOT DONE tasks with filters...');
-      const notDoneResponse = await this.notion.databases.query({
+      // Query for NOT DONE tasks
+      const response = await this.notion.databases.query({
         database_id: this.databaseId,
         filter: {
           property: 'Status',
@@ -160,246 +65,190 @@ class NotionService {
         },
         sorts: [
           {
-            property: 'Assigned', // Person Assigned filter (prioritize assigned tasks)
+            property: 'Priority',
             direction: 'ascending'
           },
           {
-            property: 'Due', // Due Date descending
-            direction: 'descending'
-          },
-          {
-            property: 'Priority',
+            property: 'Due',
             direction: 'ascending'
           }
         ],
         page_size: 100
       });
 
-      // Fetch COMPLETED tasks (last 10)
-      console.log('📋 Fetching last 10 DONE tasks...');
-      const doneResponse = await this.notion.databases.query({
-        database_id: this.databaseId,
-        filter: {
-          property: 'Status',
-          status: {
-            equals: 'Done'
-          }
-        },
-        sorts: [
-          {
-            property: 'Due', // Most recently completed first
-            direction: 'descending'
-          }
-        ],
-        page_size: 10 // Only last 10 done tasks
+      console.log(`Found ${response.results.length} tasks`);
+      
+      const tasks = response.results.map(page => {
+        // Use "Task name" instead of "Name"
+        const titleProp = page.properties['Task name'] || page.properties['Name'] || page.properties['Title'];
+        const title = titleProp?.title?.[0]?.plain_text || 'Untitled Task';
+        
+        // Get status
+        const status = page.properties.Status?.status?.name || 'No Status';
+        
+        // Get assignee(s)
+        const assignedPeople = page.properties.Assigned?.people || [];
+        const assignee = assignedPeople.length > 0 
+          ? assignedPeople.map(p => p.name).join(', ')
+          : 'Unassigned';
+        
+        // Get priority
+        const priorityProp = page.properties.Priority;
+        let priority = 'Medium';
+        if (priorityProp?.select) {
+          priority = priorityProp.select.name;
+        } else if (priorityProp?.multi_select?.[0]) {
+          priority = priorityProp.multi_select[0].name;
+        }
+        
+        // Get due date
+        const dueDate = page.properties.Due?.date?.start || null;
+        
+        // Get type if available
+        const type = page.properties.Type?.select?.name || null;
+        
+        // Get brand/project if available
+        const brandProject = page.properties['Brand/Projects']?.multi_select?.map(s => s.name).join(', ') || null;
+        
+        return {
+          id: page.id,
+          title: title,
+          name: title, // Alias for compatibility
+          status: status,
+          assignee: assignee,
+          assignedTo: assignee, // Alias for frontend
+          priority: priority,
+          dueDate: dueDate,
+          deadline: dueDate, // Alias
+          type: type,
+          brandProject: brandProject,
+          url: page.url
+        };
       });
-
-      const notDoneTasks = notDoneResponse.results || [];
-      const doneTasks = doneResponse.results.slice(0, 10) || []; // Ensure max 10
-
-      console.log(`📊 Found ${notDoneTasks.length} not done tasks, ${doneTasks.length} recent done tasks`);
       
-      // Combine tasks: NOT DONE first, then 10 most recent DONE
-      const allTasks = [...notDoneTasks, ...doneTasks];
+      // Filter out completed tasks
+      const pendingTasks = tasks.filter(task => 
+        task.status !== 'Done' && 
+        task.status !== 'Completed' &&
+        task.status !== 'Cancelled'
+      );
       
-      if (allTasks.length === 0) {
-        return { 
-          success: true, 
-          tasks: [], 
-          statusOptions: this.statusOptions,
-          message: 'Database is empty - add some tasks to your Notion database!'
+      return {
+        success: true,
+        tasks: pendingTasks,
+        totalTasks: pendingTasks.length
+      };
+      
+    } catch (error) {
+      console.error('❌ Failed to get Notion tasks:', error);
+      return {
+        success: false,
+        error: error.message,
+        tasks: []
+      };
+    }
+  }
+
+  async createTask(taskData) {
+    if (!this.notion) {
+      return { success: false, error: 'Notion not configured' };
+    }
+
+    try {
+      console.log('📝 Creating task in Notion:', taskData);
+      
+      // Build properties based on your database structure
+      const properties = {
+        // Use "Task name" for title
+        'Task name': {
+          title: [
+            {
+              text: {
+                content: taskData.title || 'New Task'
+              }
+            }
+          ]
+        },
+        'Status': {
+          status: {
+            name: taskData.status || 'To-do'
+          }
+        }
+      };
+      
+      // Add priority if provided
+      if (taskData.priority) {
+        properties['Priority'] = {
+          select: {
+            name: taskData.priority
+          }
         };
       }
-
-      // Parse tasks
-      const parsedTasks = allTasks.map(page => this.parseNotionPage(page, dbInfo.properties));
       
-      // Apply final sorting: NOT DONE first (by person assigned, then due date), then DONE
-      const sortedTasks = parsedTasks.sort((a, b) => {
-        // First: NOT DONE tasks come before DONE tasks
-        const aIsDone = a.rawStatus?.toLowerCase() === 'done';
-        const bIsDone = b.rawStatus?.toLowerCase() === 'done';
-        
-        if (!aIsDone && bIsDone) return -1; // a (not done) comes first
-        if (aIsDone && !bIsDone) return 1;  // b (not done) comes first
-        
-        // Within same completion status
-        if (!aIsDone && !bIsDone) {
-          // Both not done: sort by assigned (assigned tasks first), then due date
-          const aAssigned = a.assignee !== 'Unassigned';
-          const bAssigned = b.assignee !== 'Unassigned';
-          
-          if (aAssigned && !bAssigned) return -1;
-          if (!aAssigned && bAssigned) return 1;
-          
-          // Then by due date (descending - most urgent first)
-          if (a.deadline && b.deadline) {
-            return new Date(b.deadline) - new Date(a.deadline);
+      // Add assignee if provided and it's not "Team" or "Unassigned"
+      if (taskData.assignee && taskData.assignee !== 'Team' && taskData.assignee !== 'Unassigned') {
+        // For people property, we need to search for the user first
+        // For now, we'll skip this as it requires user ID
+        console.log(`Note: Cannot auto-assign to ${taskData.assignee} - requires user ID`);
+      }
+      
+      // Add due date if provided
+      if (taskData.dueDate) {
+        properties['Due'] = {
+          date: {
+            start: taskData.dueDate
           }
-          if (a.deadline && !b.deadline) return -1;
-          if (!a.deadline && b.deadline) return 1;
-        }
-        
-        // Done tasks already sorted by due date from query
-        return 0;
+        };
+      }
+      
+      // Add type if provided
+      if (taskData.type) {
+        properties['Type'] = {
+          select: {
+            name: taskData.type
+          }
+        };
+      }
+      
+      // Create the page
+      const response = await this.notion.pages.create({
+        parent: {
+          database_id: this.databaseId
+        },
+        properties: properties
       });
       
-      console.log(`✅ Returning ${sortedTasks.length} tasks (${notDoneTasks.length} not done + ${doneTasks.length} recent done)`);
+      console.log('✅ Task created successfully:', response.id);
       
-      return { 
-        success: true, 
-        tasks: sortedTasks, 
-        statusOptions: this.statusOptions,
-        databaseId: this.databaseId,
-        summary: {
-          notDone: notDoneTasks.length,
-          recentDone: doneTasks.length,
-          total: sortedTasks.length
+      return {
+        success: true,
+        task: {
+          id: response.id,
+          title: taskData.title,
+          url: response.url
         }
       };
-    } catch (error) {
-      console.error('❌ Notion API error:', error);
-      return { 
-        success: false, 
-        error: `Failed to sync Notion: ${error.message}`
-      };
-    }
-  }
-
-  parseNotionPage(page, properties = {}) {
-    const pageProps = page.properties;
-    
-    const getPropertyValue = (prop) => {
-      if (!prop) return null;
       
-      switch (prop.type) {
-        case 'title':
-          return prop.title?.[0]?.plain_text || '';
-        case 'rich_text':
-          return prop.rich_text?.[0]?.plain_text || '';
-        case 'select':
-          return prop.select?.name || null;
-        case 'multi_select':
-          return prop.multi_select?.map(item => item.name) || [];
-        case 'date':
-          return prop.date?.start || null;
-        case 'people':
-          return prop.people?.map(person => ({
-            id: person.id,
-            name: person.name || 'Unknown User',
-            avatar_url: person.avatar_url || null
-          })) || [];
-        case 'number':
-          return prop.number || null;
-        case 'checkbox':
-          return prop.checkbox || false;
-        case 'url':
-          return prop.url || null;
-        case 'formula':
-          return prop.formula?.string || prop.formula?.number || null;
-        case 'rollup':
-          return prop.rollup?.array || prop.rollup?.number || null;
-        case 'status':
-          if (prop.status) {
-            const statusOption = this.statusOptions.find(opt => opt.name === prop.status.name);
-            return {
-              name: prop.status.name,
-              color: statusOption?.color || 'default',
-              id: statusOption?.id || null
-            };
-          }
-          return null;
-        default:
-          return null;
+    } catch (error) {
+      console.error('❌ Failed to create task:', error);
+      
+      // Provide helpful error messages
+      if (error.code === 'validation_error') {
+        return {
+          success: false,
+          error: 'Database structure mismatch. Check property names and types.'
+        };
+      } else if (error.code === 'unauthorized') {
+        return {
+          success: false,
+          error: 'Integration lacks permission to create pages.'
+        };
       }
-    };
-
-    // Map your actual Notion properties
-    const taskName = getPropertyValue(pageProps['Task name']) || 
-                     getPropertyValue(pageProps['Name']) || 
-                     getPropertyValue(pageProps['Title']) || 
-                     'Untitled Task';
-    
-    const statusObject = getPropertyValue(pageProps['Status']) || { name: 'Not Done Yet', color: 'red' };
-    const assigned = getPropertyValue(pageProps['Assigned']) || [];
-    const dueDate = getPropertyValue(pageProps['Due']);
-    const priority = getPropertyValue(pageProps['Priority']);
-    const brandProject = getPropertyValue(pageProps['Brand/Projects']) || 
-                        getPropertyValue(pageProps['Project']) || [];
-    const type = getPropertyValue(pageProps['Type']);
-    const links = getPropertyValue(pageProps['Links']);
-
-    // Extract assignee info
-    const assignedUsers = Array.isArray(assigned) ? assigned : [];
-    const primaryAssignee = assignedUsers.length > 0 ? assignedUsers[0].name : 'Unassigned';
-    const allAssignees = assignedUsers.map(user => user.name);
-
-    return {
-      id: `notion-${page.id}`,
-      notionId: page.id,
-      title: taskName,
-      name: taskName, // Alias for frontend compatibility
-      status: this.mapNotionStatusToOurs(statusObject.name),
-      rawStatus: statusObject.name,
-      statusColor: statusObject.color,
-      assignee: primaryAssignee,
-      assignedUsers: assignedUsers,
-      keyPeople: allAssignees,
-      project: Array.isArray(brandProject) ? brandProject.join(', ') : (brandProject || 'General'),
-      priority: priority,
-      urgency: this.mapNotionPriorityToUrgency(priority),
-      deadline: dueDate ? new Date(dueDate) : null,
-      type: type || 'Task',
-      links: links,
-      tags: [
-        'notion',
-        ...(Array.isArray(brandProject) ? brandProject : (brandProject ? [brandProject] : [])),
-        ...(type ? [type] : [])
-      ],
-      created: new Date(page.created_time),
-      updated: new Date(page.last_edited_time),
-      source: 'notion',
-      notionUrl: page.url,
-      aiGenerated: false,
-      category: 'task'
-    };
-  }
-
-  mapNotionStatusToOurs(notionStatus) {
-    if (!notionStatus) return 'pending';
-    
-    switch (notionStatus.toLowerCase()) {
-      case 'done':
-        return 'completed';
-      case 'in progress':
-        return 'in_progress';
-      case 'daily task':
-        return 'daily';
-      case 'not done yet':
-      default:
-        return 'pending';
-    }
-  }
-
-  mapNotionPriorityToUrgency(priority) {
-    if (!priority) return 3;
-    
-    switch (priority.toLowerCase()) {
-      case 'urgent':
-      case 'critical':
-      case 'high':
-      case '5':
-      case '4':
-        return 5;
-      case 'medium':
-      case '3':
-        return 3;
-      case 'low':
-      case '2':
-      case '1':
-        return 2;
-      default:
-        return 3;
+      
+      return {
+        success: false,
+        error: error.message
+      };
     }
   }
 
@@ -409,58 +258,49 @@ class NotionService {
     }
 
     try {
-      // Extract clean page ID - handle both formats
-      let cleanPageId = taskId;
-      if (taskId.startsWith('notion-')) {
-        cleanPageId = taskId.replace('notion-', '');
-      }
-      
-      // Remove any extra quotes or formatting
-      cleanPageId = cleanPageId.replace(/['\"]/g, '');
-      
-      console.log(`📝 Updating Notion task ${cleanPageId} to status: ${status}`);
-      
-      // Map our status to Notion status
-      const notionStatus = status === 'completed' ? 'Done' : 'Not done yet';
-      
-      const response = await this.notion.pages.update({
-        page_id: cleanPageId,
+      await this.notion.pages.update({
+        page_id: taskId,
         properties: {
           'Status': {
             status: {
-              name: notionStatus
+              name: status
             }
           }
         }
       });
-
-      console.log(`✅ Task ${cleanPageId} updated to: ${notionStatus}`);
       
-      return { 
-        success: true, 
-        page: response,
-        newStatus: notionStatus
+      return {
+        success: true,
+        message: `Task status updated to ${status}`
       };
+      
     } catch (error) {
-      console.error('❌ Failed to update Notion task:', error);
-      return { 
-        success: false, 
-        error: `Failed to update task: ${error.message}` 
+      console.error('Failed to update task status:', error);
+      return {
+        success: false,
+        error: error.message
       };
     }
   }
 
-  mapOurStatusToNotion(status) {
-    switch (status) {
-      case 'completed':
-        return 'Done';
-      case 'in_progress':
-        return 'In progress';
-      case 'daily':
-        return 'Daily Task';
-      case 'pending':
-      default:
-        return 'Not done yet';
+  // Method to get available status options from your database
+  async getStatusOptions() {
+    if (!this.notion) return [];
+    
+    try {
+      const database = await this.notion.databases.retrieve({
+        database_id: this.databaseId
+      });
+      
+      const statusProperty = database.properties['Status'];
+      if (statusProperty && statusProperty.status) {
+        return statusProperty.status.options.map(opt => opt.name);
+      }
+      
+      return [];
+    } catch (error) {
+      console.error('Failed to get status options:', error);
+      return [];
     }
   }
 }
