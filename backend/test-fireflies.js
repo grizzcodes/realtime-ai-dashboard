@@ -8,21 +8,32 @@ async function testFirefliesParsing() {
   try {
     console.log('🔍 Testing Fireflies message parsing...\n');
     
-    // Get the fireflies-ai channel
-    const channelsResult = await slack.conversations.list({
+    // Get both public and private channels
+    const publicChannelsResult = await slack.conversations.list({
       exclude_archived: true,
-      types: 'public_channel,private_channel',
+      types: 'public_channel',
       limit: 200
     });
     
-    const channel = channelsResult.channels.find(c => c.name === 'fireflies-ai');
+    const privateChannelsResult = await slack.conversations.list({
+      exclude_archived: true,
+      types: 'private_channel',
+      limit: 200
+    });
+    
+    // Combine all channels
+    const allChannels = [...publicChannelsResult.channels, ...privateChannelsResult.channels];
+    
+    // Find fireflies-ai channel
+    const channel = allChannels.find(c => c.name === 'fireflies-ai');
     
     if (!channel) {
       console.log('❌ Channel fireflies-ai not found');
+      console.log('   Make sure the bot is invited to the channel');
       return;
     }
     
-    console.log(`✅ Found channel: #fireflies-ai\n`);
+    console.log(`✅ Found channel: #fireflies-ai (${channel.is_private ? 'Private' : 'Public'})\n`);
     
     // Get recent messages
     const messagesResult = await slack.conversations.history({
