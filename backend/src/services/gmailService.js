@@ -68,15 +68,20 @@ class GmailService {
     }
 
     try {
+      console.log(`📧 Fetching ${maxResults} emails from Gmail...`);
+      
       const response = await this.gmail.users.messages.list({
         userId: 'me',
-        maxResults,
-        q: 'is:unread' // Only unread emails
+        maxResults: maxResults,
+        q: 'in:inbox' // Changed from 'is:unread' to get all inbox emails
       });
 
       const messages = response.data.messages || [];
+      console.log(`📬 Found ${messages.length} messages, processing ${Math.min(messages.length, maxResults)}...`);
+      
+      // FIXED: Use maxResults instead of hardcoded 5
       const emailDetails = await Promise.all(
-        messages.slice(0, 5).map(async (message) => {
+        messages.slice(0, maxResults).map(async (message) => {
           const details = await this.gmail.users.messages.get({
             userId: 'me',
             id: message.id
@@ -88,11 +93,13 @@ class GmailService {
             subject: this.getHeader(details.data.payload.headers, 'Subject'),
             from: this.getHeader(details.data.payload.headers, 'From'),
             date: this.getHeader(details.data.payload.headers, 'Date'),
-            snippet: details.data.snippet
+            snippet: details.data.snippet,
+            isUnread: details.data.labelIds?.includes('UNREAD') || false
           };
         })
       );
 
+      console.log(`✅ Successfully fetched ${emailDetails.length} emails`);
       return { success: true, emails: emailDetails };
     } catch (error) {
       console.error('Failed to get recent emails:', error.message);
