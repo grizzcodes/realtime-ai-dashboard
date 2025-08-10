@@ -36,6 +36,46 @@ app.post('/api/gmail/archive/:emailId', async (req, res) => {
   }
 });
 
+// Add Gmail draft reply endpoint
+app.post('/api/gmail/draft-reply', async (req, res) => {
+  try {
+    const { emailId, subject, from, snippet } = req.body;
+    console.log(`✉️ Generating draft reply for email: ${emailId}`);
+    
+    // Generate AI-powered draft reply
+    const prompt = `Generate a professional email reply to:
+From: ${from}
+Subject: ${subject}
+Preview: ${snippet}
+
+Please create a brief, professional response that addresses the email content appropriately.`;
+
+    const aiResponse = await integrationService.chatWithAI(prompt, {
+      type: 'email_draft',
+      originalEmail: { from, subject, snippet }
+    });
+    
+    if (aiResponse.success) {
+      res.json({
+        success: true,
+        draftContent: aiResponse.response,
+        emailId: emailId
+      });
+    } else {
+      res.status(400).json({
+        success: false,
+        error: 'Failed to generate draft reply'
+      });
+    }
+  } catch (error) {
+    console.error('❌ Failed to generate draft reply:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 // Add Gmail latest emails endpoint
 app.get('/api/gmail/latest', async (req, res) => {
   try {
