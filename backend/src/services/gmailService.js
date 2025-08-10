@@ -143,6 +143,110 @@ class GmailService {
     }
   }
 
+  // Archive email functionality
+  async archiveEmail(messageId) {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+
+    if (!this.initialized) {
+      return { success: false, error: 'Gmail not initialized' };
+    }
+
+    try {
+      // Remove the INBOX label and add the ARCHIVED label
+      const response = await this.gmail.users.messages.modify({
+        userId: 'me',
+        id: messageId,
+        requestBody: {
+          removeLabelIds: ['INBOX'],
+          addLabelIds: [] // Gmail automatically archives when removing INBOX
+        }
+      });
+
+      console.log(`✅ Email ${messageId} archived successfully`);
+      return { 
+        success: true, 
+        message: 'Email archived successfully',
+        data: response.data 
+      };
+    } catch (error) {
+      console.error('Failed to archive email:', error.message);
+      return { 
+        success: false, 
+        error: error.message 
+      };
+    }
+  }
+
+  // Mark email as read
+  async markAsRead(messageId) {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+
+    if (!this.initialized) {
+      return { success: false, error: 'Gmail not initialized' };
+    }
+
+    try {
+      const response = await this.gmail.users.messages.modify({
+        userId: 'me',
+        id: messageId,
+        requestBody: {
+          removeLabelIds: ['UNREAD']
+        }
+      });
+
+      console.log(`✅ Email ${messageId} marked as read`);
+      return { 
+        success: true, 
+        message: 'Email marked as read',
+        data: response.data 
+      };
+    } catch (error) {
+      console.error('Failed to mark email as read:', error.message);
+      return { 
+        success: false, 
+        error: error.message 
+      };
+    }
+  }
+
+  // Star/Unstar email
+  async toggleStar(messageId, star = true) {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+
+    if (!this.initialized) {
+      return { success: false, error: 'Gmail not initialized' };
+    }
+
+    try {
+      const response = await this.gmail.users.messages.modify({
+        userId: 'me',
+        id: messageId,
+        requestBody: star 
+          ? { addLabelIds: ['STARRED'] }
+          : { removeLabelIds: ['STARRED'] }
+      });
+
+      console.log(`✅ Email ${messageId} ${star ? 'starred' : 'unstarred'} successfully`);
+      return { 
+        success: true, 
+        message: `Email ${star ? 'starred' : 'unstarred'} successfully`,
+        data: response.data 
+      };
+    } catch (error) {
+      console.error(`Failed to ${star ? 'star' : 'unstar'} email:`, error.message);
+      return { 
+        success: false, 
+        error: error.message 
+      };
+    }
+  }
+
   getHeader(headers, name) {
     const header = headers.find(h => h.name.toLowerCase() === name.toLowerCase());
     return header ? header.value : '';
