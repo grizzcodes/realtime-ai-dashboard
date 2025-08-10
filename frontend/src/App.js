@@ -110,6 +110,53 @@ const App = () => {
     }
   };
 
+  // ADD: Archive email function
+  const archiveEmail = async (emailId) => {
+    try {
+      const response = await fetch(`http://localhost:3001/api/gmail/archive/${emailId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      
+      if (response.ok) {
+        // Remove email from the list
+        setEmails(prev => prev.filter(e => e.id !== emailId));
+        console.log('Email archived successfully');
+      } else {
+        console.error('Failed to archive email');
+      }
+    } catch (error) {
+      console.error('Failed to archive email:', error);
+    }
+  };
+
+  // ADD: Generate draft reply function
+  const generateDraftReply = async (email) => {
+    try {
+      const response = await fetch('http://localhost:3001/api/gmail/draft-reply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          emailId: email.id,
+          subject: email.subject,
+          from: email.from,
+          snippet: email.snippet
+        })
+      });
+      
+      const data = await response.json();
+      
+      if (data.success) {
+        // Show the draft
+        alert(`Draft Reply Generated:\n\n${data.draftContent}`);
+      } else {
+        console.error('Failed to generate draft');
+      }
+    } catch (error) {
+      console.error('Failed to generate draft:', error);
+    }
+  };
+
   const loadMeetings = async () => {
     try {
       const response = await fetch('http://localhost:3001/api/fireflies/meetings');
@@ -512,7 +559,7 @@ const App = () => {
               )}
             </div>
 
-            {/* Right Column - Emails */}
+            {/* Right Column - Emails WITH BUTTONS */}
             <div className="card-glass p-6 animate-fade-in">
               <div className="flex justify-between items-center mb-4">
                 <h2 className="text-xl font-bold text-glow">📧 Gmail ({emails.length})</h2>
@@ -542,9 +589,23 @@ const App = () => {
                             {email.snippet}
                           </p>
                         </div>
-                        <button className="btn-glass px-2 py-1 text-xs rounded">
-                          📁
-                        </button>
+                        {/* UPDATED: Added archive and draft buttons */}
+                        <div className="flex gap-1">
+                          <button 
+                            onClick={() => archiveEmail(email.id)}
+                            className="btn-glass px-2 py-1 text-xs rounded"
+                            title="Archive Email"
+                          >
+                            🗑️
+                          </button>
+                          <button 
+                            onClick={() => generateDraftReply(email)}
+                            className="btn-glass px-2 py-1 text-xs rounded"
+                            title="Generate Draft Reply"
+                          >
+                            ✉️
+                          </button>
+                        </div>
                       </div>
                     </div>
                   ))}
