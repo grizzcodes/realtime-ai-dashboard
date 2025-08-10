@@ -45,6 +45,7 @@ app.get('/health', (req, res) => {
 // Load route modules
 require('./server.js'); // Gmail routes
 require('./enhanced-endpoints.js'); // Additional endpoints
+require('./src/routes/slackFirefliesRoutes')(app); // Slack-Fireflies integration
 
 // WebSocket connection handling
 io.on('connection', (socket) => {
