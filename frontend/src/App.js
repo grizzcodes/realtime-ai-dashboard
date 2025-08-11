@@ -719,7 +719,7 @@ const App = () => {
                 </>
               }
             >
-              {/* Collapsed view - SHOWING MORE TASKS */}
+              {/* Collapsed view - SHOWING AT LEAST 10 TASKS */}
               <div className="flex items-center gap-3 mb-4">
                 <div className="relative">
                   <button
@@ -759,8 +759,8 @@ const App = () => {
                   }
                 </p>
               ) : (
-                <div className="space-y-3 max-h-96 overflow-y-auto">
-                  {filteredNotionTasks.slice(0, 15).map(task => (
+                <div className="space-y-2">
+                  {filteredNotionTasks.slice(0, filteredNotionTasks.length).map(task => (
                     <div key={task.id} className="task-card">
                       <div className="flex justify-between items-start">
                         <div className="flex-1">
@@ -780,11 +780,6 @@ const App = () => {
                       </div>
                     </div>
                   ))}
-                  {filteredNotionTasks.length > 15 && (
-                    <p className="text-xs opacity-50 text-center">
-                      +{filteredNotionTasks.length - 15} more tasks
-                    </p>
-                  )}
                 </div>
               )}
             </ExpandableCard>
@@ -860,7 +855,7 @@ const App = () => {
                     No upcoming events.
                   </p>
                 ) : (
-                  <div className="space-y-3 max-h-64 overflow-y-auto">
+                  <div className="space-y-2">
                     {calendarEvents.map(event => (
                       <div key={event.id} className="task-card">
                         <div className="flex justify-between items-start mb-2">
@@ -1022,8 +1017,8 @@ const App = () => {
                     No meetings found.
                   </p>
                 ) : (
-                  <div className="space-y-3 max-h-64 overflow-y-auto">
-                    {meetings.slice(0, 3).map(meeting => (
+                  <div className="space-y-2">
+                    {meetings.map(meeting => (
                       <div key={meeting.id} className="task-card">
                         <h4 className="font-medium text-sm">{meeting.title}</h4>
                         <div className="flex items-center gap-4 mt-2 text-xs opacity-70">
@@ -1037,11 +1032,6 @@ const App = () => {
                         )}
                       </div>
                     ))}
-                    {meetings.length > 3 && (
-                      <p className="text-xs opacity-50 text-center">
-                        +{meetings.length - 3} more meetings
-                      </p>
-                    )}
                   </div>
                 )}
               </ExpandableCard>
@@ -1107,14 +1097,14 @@ const App = () => {
                 </div>
               }
             >
-              {/* Collapsed view - SHOWING MORE EMAILS */}
+              {/* Collapsed view - SHOWING AT LEAST 10 EMAILS */}
               {emails.length === 0 ? (
                 <p className="opacity-70 text-center py-8">
                   No emails found. Check your Gmail integration.
                 </p>
               ) : (
-                <div className="space-y-3 max-h-[420px] overflow-y-auto">
-                  {emails.slice(0, 10).map(email => (
+                <div className="space-y-2">
+                  {emails.slice(0, emails.length).map(email => (
                     <div 
                       key={email.id} 
                       className={`task-card email-card ${
@@ -1161,11 +1151,6 @@ const App = () => {
                       </div>
                     </div>
                   ))}
-                  {emails.length > 10 && (
-                    <p className="text-xs opacity-50 text-center">
-                      +{emails.length - 10} more emails
-                    </p>
-                  )}
                 </div>
               )}
             </ExpandableCard>
