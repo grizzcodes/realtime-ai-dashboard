@@ -1,33 +1,48 @@
+// backend/package.json
 {
-  "name": "realtime-ai-dashboard-backend",
-  "version": "1.0.0",
-  "description": "Real-time AI dashboard backend with webhook processing",
+  "name": "ai-dashboard-backend",
+  "version": "2.0.0",
+  "description": "AI-powered real-time dashboard backend with memory and context",
   "main": "main.js",
   "scripts": {
     "start": "node main.js",
     "dev": "nodemon main.js",
-    "test": "node scripts/test-webhooks.js",
-    "test:calendar": "node scripts/test-calendar.js",
-    "test:integrations": "node scripts/test-integrations.js"
+    "debug-notion": "node debug-notion.js",
+    "test": "echo \"Test script not implemented\" && exit 0"
   },
+  "keywords": [
+    "ai",
+    "dashboard",
+    "real-time",
+    "integrations",
+    "openai",
+    "claude"
+  ],
+  "author": "DGenz",
+  "license": "MIT",
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.57.0",
+    "@anthropic-ai/sdk": "^0.20.1",
+    "@google-cloud/pubsub": "^3.0.0",
     "@notionhq/client": "^2.2.15",
-    "@supabase/supabase-js": "^2.53.0",
-    "axios": "^1.5.0",
+    "@slack/web-api": "^6.9.0",
+    "@supabase/supabase-js": "^2.39.3",
+    "axios": "^1.6.5",
+    "body-parser": "^1.20.2",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
-    "googleapis": "^126.0.1",
-    "helmet": "^7.0.0",
+    "google-auth-library": "^9.5.0",
+    "googleapis": "^131.0.0",
+    "helmet": "^7.1.0",
     "morgan": "^1.10.0",
-    "node-fetch": "^2.6.1",
-    "openai": "^4.0.0",
-    "socket.io": "^4.7.2",
-    "uuid": "^9.0.0",
-    "winston": "^3.10.0"
+    "nodemailer": "^6.9.8",
+    "openai": "^4.26.0",
+    "socket.io": "^4.6.0"
   },
   "devDependencies": {
-    "nodemon": "^3.0.1"
+    "nodemon": "^3.0.2"
+  },
+  "engines": {
+    "node": ">=16.0.0"
   }
 }
