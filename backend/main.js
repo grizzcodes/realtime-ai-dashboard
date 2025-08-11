@@ -45,7 +45,20 @@ app.get('/health', (req, res) => {
 // Load route modules
 require('./server.js'); // Gmail routes
 require('./enhanced-endpoints.js'); // Additional endpoints
-require('./src/routes/slackFirefliesRoutes')(app); // Slack-Fireflies integration
+
+// Check if Slack-Fireflies routes exist before requiring
+const fs = require('fs');
+const path = require('path');
+if (fs.existsSync(path.join(__dirname, 'src/routes/slackFirefliesRoutes.js'))) {
+  require('./src/routes/slackFirefliesRoutes')(app); // Slack-Fireflies integration
+}
+
+// Load Fireflies API routes if available
+if (fs.existsSync(path.join(__dirname, 'api/fireflies.js'))) {
+  const firefliesRoutes = require('./api/fireflies');
+  app.use('/api/fireflies', firefliesRoutes);
+  console.log('🔥 Fireflies API routes loaded');
+}
 
 // WebSocket connection handling
 io.on('connection', (socket) => {
