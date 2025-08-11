@@ -38,17 +38,28 @@ router.get('/meetings', async (req, res) => {
       timestamp: meeting.timestamp
     }));
     
+    // Calculate total action items correctly
+    const totalActionItems = transformedMeetings.reduce((total, meeting) => {
+      if (meeting.actionItems && Array.isArray(meeting.actionItems)) {
+        return total + meeting.actionItems.reduce((sum, item) => {
+          return sum + (item.tasks ? item.tasks.length : 0);
+        }, 0);
+      }
+      return total;
+    }, 0);
+    
     res.json({
       success: true,
       meetings: transformedMeetings,
       total: transformedMeetings.length,
-      totalActionItems: firefliesParser.getTotalActionItems(transformedMeetings)
+      totalActionItems: totalActionItems
     });
   } catch (error) {
     console.error('Error fetching Fireflies meetings:', error);
     res.status(500).json({
       success: false,
-      error: error.message
+      error: error.message,
+      meetings: []
     });
   }
 });
@@ -73,7 +84,8 @@ router.get('/action-items', async (req, res) => {
     console.error('Error fetching action items:', error);
     res.status(500).json({
       success: false,
-      error: error.message
+      error: error.message,
+      actionItems: {}
     });
   }
 });
