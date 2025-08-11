@@ -57,9 +57,15 @@ app.get('/health', (req, res) => {
 require('./server.js'); // Gmail routes
 require('./enhanced-endpoints.js'); // Additional endpoints
 
-// Check if Slack-Fireflies routes exist before requiring
+// Check if Auth routes exist and load them
 const fs = require('fs');
 const path = require('path');
+if (fs.existsSync(path.join(__dirname, 'src/routes/authRoutes.js'))) {
+  require('./src/routes/authRoutes')(app);
+  console.log('🔐 Google OAuth routes loaded - visit /auth/google to authenticate');
+}
+
+// Check if Slack-Fireflies routes exist before requiring
 if (fs.existsSync(path.join(__dirname, 'src/routes/slackFirefliesRoutes.js'))) {
   require('./src/routes/slackFirefliesRoutes')(app); // Slack-Fireflies integration
 }
@@ -93,6 +99,14 @@ server.listen(PORT, () => {
   console.log(`📊 Dashboard: http://localhost:${PORT}/health`);
   console.log('🔗 WebSocket server active');
   console.log('🤖 AI services ready with memory and modes');
+  
+  // Show OAuth setup reminder if not configured
+  if (!process.env.GOOGLE_REFRESH_TOKEN) {
+    console.log('');
+    console.log('⚠️  Gmail Archive Not Working? Set up OAuth:');
+    console.log(`   Visit: http://localhost:${PORT}/auth/google`);
+    console.log('');
+  }
 });
 
 // Graceful shutdown
