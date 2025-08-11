@@ -338,18 +338,22 @@ const App = () => {
     }
   };
 
-  // Push action item to Notion (UPDATED to handle assignee from action item)
-  const pushActionItemToNotion = async (actionItem, meeting, index) => {
+  // Push action item to Notion - UPDATED to handle the new structure with tasks array
+  const pushActionItemToNotion = async (actionItem, assignee, meeting, taskIndex, assigneeIndex) => {
     // Extract the task text and assignee
     let taskText = '';
-    let assignee = 'Team';
+    let taskAssignee = 'Team';
     
-    if (typeof actionItem === 'object' && actionItem.task) {
-      // New format with assignee
+    if (typeof actionItem === 'string') {
+      // This is a specific task string with an assignee
+      taskText = actionItem;
+      taskAssignee = assignee || 'Team';
+    } else if (typeof actionItem === 'object' && actionItem.task) {
+      // Old format with task property
       taskText = actionItem.task;
-      assignee = actionItem.assignee || 'Team';
+      taskAssignee = actionItem.assignee || 'Team';
     } else {
-      // Old format (just text)
+      // Fallback
       taskText = actionItem;
     }
     
@@ -358,10 +362,10 @@ const App = () => {
     if (!editedText) return;
     
     // Keep the assignee from the action item or auto-detect from edited text
-    if (assignee === 'Team') {
+    if (taskAssignee === 'Team') {
       teamMembers.slice(1).forEach(member => {
         if (editedText.toLowerCase().includes(member.toLowerCase())) {
-          assignee = member;
+          taskAssignee = member;
         }
       });
     }
@@ -389,7 +393,8 @@ const App = () => {
     }
     
     // Set loading state
-    setPushingToNotion(prev => ({ ...prev, [`${meeting.id}-${index}`]: true }));
+    const loadingKey = `${meeting.id}-${assigneeIndex}-${taskIndex}`;
+    setPushingToNotion(prev => ({ ...prev, [loadingKey]: true }));
     
     try {
       const response = await fetch('http://localhost:3001/api/notion/tasks', {
@@ -397,7 +402,7 @@ const App = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           title: editedText,
-          assignee: assignee,
+          assignee: taskAssignee,
           priority: priority,
           dueDate: dueDate.toISOString().split('T')[0],
           source: `Fireflies: ${meeting.title}`,
@@ -406,7 +411,7 @@ const App = () => {
       });
       
       if (response.ok) {
-        alert(`✅ Added to Notion!\n\nTask: ${editedText}\nAssigned to: ${assignee}\nPriority: ${priority}`);
+        alert(`✅ Added to Notion!\n\nTask: ${editedText}\nAssigned to: ${taskAssignee}\nPriority: ${priority}`);
         // Reload Notion tasks to show the new one
         loadNotionTasks();
       } else {
@@ -416,7 +421,7 @@ const App = () => {
       console.error('Error pushing to Notion:', error);
       alert('❌ Error connecting to Notion');
     } finally {
-      setPushingToNotion(prev => ({ ...prev, [`${meeting.id}-${index}`]: false }));
+      setPushingToNotion(prev => ({ ...prev, [loadingKey]: false }));
     }
   };
 
@@ -910,40 +915,79 @@ const App = () => {
                         {meeting.actionItems && meeting.actionItems.length > 0 && (
                           <div className="mb-3">
                             <h5 className="text-xs font-medium opacity-80 mb-1">Action Items:</h5>
-                            <div className="space-y-1">
-                              {meeting.actionItems.map((item, index) => {
-                                const taskText = typeof item === 'object' ? item.task : item;
-                                const assignee = typeof item === 'object' ? item.assignee : null;
-                                
-                                return (
-                                  <div key={index} className="flex items-center gap-2">
-                                    <div className="flex-1">
-                                      <p className="text-xs opacity-70">
-                                        • {taskText}
-                                      </p>
-                                      {assignee && (
-                                        <span className="text-xs opacity-50 ml-3">
-                                          👤 {assignee}
-                                        </span>
-                                      )}
+                            <div className="space-y-2">
+                              {meeting.actionItems.map((item, assigneeIndex) => {
+                                // Check if this is the new format with assignee and tasks array
+                                if (typeof item === 'object' && item.tasks && Array.isArray(item.tasks)) {
+                                  // New format: { assignee: "Name", tasks: ["task1", "task2"] }
+                                  return (
+                                    <div key={assigneeIndex} className="ml-2">
+                                      <div className="text-xs font-medium opacity-70 mb-1">
+                                        👤 {item.assignee}:
+                                      </div>
+                                      <div className="space-y-1 ml-3">
+                                        {item.tasks.map((task, taskIndex) => (
+                                          <div key={taskIndex} className="flex items-center gap-2">
+                                            <div className="flex-1">
+                                              <p className="text-xs opacity-70">
+                                                • {task}
+                                              </p>
+                                            </div>
+                                            <button
+                                              onClick={() => pushActionItemToNotion(task, item.assignee, meeting, taskIndex, assigneeIndex)}
+                                              disabled={pushingToNotion[`${meeting.id}-${assigneeIndex}-${taskIndex}`]}
+                                              className="btn-glass px-2 py-0.5 text-xs rounded flex items-center gap-1"
+                                              title="Push to Notion"
+                                            >
+                                              {pushingToNotion[`${meeting.id}-${assigneeIndex}-${taskIndex}`] ? (
+                                                <div className="loading-spinner border-white w-3 h-3"></div>
+                                              ) : (
+                                                <>
+                                                  <Plus size={10} />
+                                                  Notion
+                                                </>
+                                              )}
+                                            </button>
+                                          </div>
+                                        ))}
+                                      </div>
                                     </div>
-                                    <button
-                                      onClick={() => pushActionItemToNotion(item, meeting, index)}
-                                      disabled={pushingToNotion[`${meeting.id}-${index}`]}
-                                      className="btn-glass px-2 py-0.5 text-xs rounded flex items-center gap-1"
-                                      title="Push to Notion"
-                                    >
-                                      {pushingToNotion[`${meeting.id}-${index}`] ? (
-                                        <div className="loading-spinner border-white w-3 h-3"></div>
-                                      ) : (
-                                        <>
-                                          <Plus size={10} />
-                                          Notion
-                                        </>
-                                      )}
-                                    </button>
-                                  </div>
-                                );
+                                  );
+                                } else {
+                                  // Old format: just a string or object with task property
+                                  const taskText = typeof item === 'object' ? item.task : item;
+                                  const assignee = typeof item === 'object' ? item.assignee : null;
+                                  
+                                  return (
+                                    <div key={assigneeIndex} className="flex items-center gap-2">
+                                      <div className="flex-1">
+                                        <p className="text-xs opacity-70">
+                                          • {taskText}
+                                        </p>
+                                        {assignee && (
+                                          <span className="text-xs opacity-50 ml-3">
+                                            👤 {assignee}
+                                          </span>
+                                        )}
+                                      </div>
+                                      <button
+                                        onClick={() => pushActionItemToNotion(item, null, meeting, 0, assigneeIndex)}
+                                        disabled={pushingToNotion[`${meeting.id}-${assigneeIndex}-0`]}
+                                        className="btn-glass px-2 py-0.5 text-xs rounded flex items-center gap-1"
+                                        title="Push to Notion"
+                                      >
+                                        {pushingToNotion[`${meeting.id}-${assigneeIndex}-0`] ? (
+                                          <div className="loading-spinner border-white w-3 h-3"></div>
+                                        ) : (
+                                          <>
+                                            <Plus size={10} />
+                                            Notion
+                                          </>
+                                        )}
+                                      </button>
+                                    </div>
+                                  );
+                                }
                               })}
                             </div>
                           </div>
