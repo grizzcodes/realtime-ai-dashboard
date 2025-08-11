@@ -18,7 +18,7 @@ class GmailService {
       this.auth = new google.auth.OAuth2(
         process.env.GOOGLE_CLIENT_ID,
         process.env.GOOGLE_CLIENT_SECRET,
-        'http://localhost:3002/auth/google/callback'
+        'http://localhost:3001/auth/google/callback'
       );
 
       if (process.env.GOOGLE_REFRESH_TOKEN) {
@@ -179,6 +179,88 @@ class GmailService {
       };
     } catch (error) {
       console.error('Failed to archive email:', error.message);
+      return { 
+        success: false, 
+        error: error.message 
+      };
+    }
+  }
+
+  // Move email to trash (delete)
+  async trashEmail(messageId) {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+
+    if (!this.initialized) {
+      return { success: false, error: 'Gmail not initialized' };
+    }
+
+    try {
+      const response = await this.gmail.users.messages.trash({
+        userId: 'me',
+        id: messageId
+      });
+
+      console.log(`🗑️ Email ${messageId} moved to trash`);
+      return { 
+        success: true, 
+        message: 'Email moved to trash',
+        data: response.data 
+      };
+    } catch (error) {
+      console.error('Failed to trash email:', error.message);
+      return { 
+        success: false, 
+        error: error.message 
+      };
+    }
+  }
+
+  // Send email
+  async sendEmail(params) {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+
+    if (!this.initialized) {
+      return { success: false, error: 'Gmail not initialized' };
+    }
+
+    try {
+      const { to, subject, body, cc, bcc } = params;
+      
+      // Create email content
+      const emailLines = [];
+      emailLines.push(`To: ${to}`);
+      if (cc) emailLines.push(`Cc: ${cc}`);
+      if (bcc) emailLines.push(`Bcc: ${bcc}`);
+      emailLines.push('Content-Type: text/html; charset=utf-8');
+      emailLines.push('MIME-Version: 1.0');
+      emailLines.push(`Subject: ${subject}`);
+      emailLines.push('');
+      emailLines.push(body);
+      
+      const email = emailLines.join('\r\n').trim();
+      
+      // Convert to base64
+      const encodedEmail = Buffer.from(email).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+      
+      const response = await this.gmail.users.messages.send({
+        userId: 'me',
+        requestBody: {
+          raw: encodedEmail
+        }
+      });
+
+      console.log(`📤 Email sent successfully to ${to}`);
+      return { 
+        success: true, 
+        message: `Email sent to ${to}`,
+        messageId: response.data.id
+      };
+    } catch (error) {
+      console.error('Failed to send email:', error.message);
       return { 
         success: false, 
         error: error.message 
