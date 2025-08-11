@@ -1,22 +1,22 @@
 // backend/src/routes/aiRoutes.js
-// AI endpoints with full integration support
+// AI endpoints with full integration support and action execution
 
 const MemoryManager = require('../ai/memoryManager');
 const ContextManager = require('../ai/contextManager');
 const UnifiedAIService = require('../ai/unifiedAIService');
 
 module.exports = (app, io, integrationService, supabaseClient) => {
-  // Initialize AI services
+  // Initialize AI services with integration service for actions
   const memoryManager = new MemoryManager(supabaseClient);
   const contextManager = new ContextManager(integrationService, memoryManager);
-  const aiService = new UnifiedAIService(memoryManager, contextManager);
+  const aiService = new UnifiedAIService(memoryManager, contextManager, integrationService);
 
-  console.log('🤖 AI Services initialized with memory and context management');
+  console.log('🤖 AI Services initialized with memory, context, and action execution');
 
-  // Main AI chat endpoint
+  // Main AI chat endpoint - now with action execution
   app.post('/api/ai/chat', async (req, res) => {
     try {
-      const { message, mode, context: userContext } = req.body;
+      const { message, mode, context: userContext, executeActions = true } = req.body;
       
       console.log(`🤖 AI Chat request in mode: ${mode || 'default'}`);
       
@@ -25,10 +25,11 @@ module.exports = (app, io, integrationService, supabaseClient) => {
         aiService.setMode(mode);
       }
       
-      // Process the message with full context
+      // Process the message with full context and action execution
       const result = await aiService.processMessage(message, {
         mode: mode || 'assistant',
         includeSlack: true,
+        skipActions: !executeActions,
         ...userContext
       });
       
@@ -38,14 +39,26 @@ module.exports = (app, io, integrationService, supabaseClient) => {
         message: result.response,
         mode: result.mode,
         model: result.model,
+        actionResult: result.actionResult,
         timestamp: result.timestamp
       });
+      
+      // If an action was executed, emit specific event
+      if (result.actionResult && result.actionResult.success) {
+        io.emit('actionExecuted', {
+          type: 'action_executed',
+          action: result.actionResult.action,
+          message: result.actionResult.message,
+          timestamp: new Date().toISOString()
+        });
+      }
       
       res.json({
         success: true,
         response: result.response,
         mode: result.mode,
         model: result.model,
+        actionResult: result.actionResult,
         context: result.context
       });
       
@@ -55,6 +68,55 @@ module.exports = (app, io, integrationService, supabaseClient) => {
         success: false,
         error: error.message,
         response: 'I encountered an error processing your request.'
+      });
+    }
+  });
+
+  // Direct action execution endpoint
+  app.post('/api/ai/execute-action', async (req, res) => {
+    try {
+      const { action, params } = req.body;
+      
+      console.log(`🎯 Executing action: ${action}`);
+      
+      const result = await aiService.executeDirectAction(action, params);
+      
+      if (result.success) {
+        io.emit('actionExecuted', {
+          type: 'action_executed',
+          action: result.action,
+          message: result.message,
+          timestamp: new Date().toISOString()
+        });
+      }
+      
+      res.json(result);
+      
+    } catch (error) {
+      console.error('❌ Action execution error:', error);
+      res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+  });
+
+  // Get available actions for current mode
+  app.get('/api/ai/actions', (req, res) => {
+    try {
+      const actions = aiService.getAvailableActions();
+      
+      res.json({
+        success: true,
+        actions: actions,
+        currentMode: aiService.currentMode
+      });
+      
+    } catch (error) {
+      console.error('❌ Actions error:', error);
+      res.status(500).json({
+        success: false,
+        error: error.message
       });
     }
   });
@@ -329,7 +391,8 @@ module.exports = (app, io, integrationService, supabaseClient) => {
       
       res.json({
         success: success,
-        currentMode: aiService.currentMode
+        currentMode: aiService.currentMode,
+        availableActions: aiService.getAvailableActions()
       });
       
     } catch (error) {
@@ -398,5 +461,5 @@ module.exports = (app, io, integrationService, supabaseClient) => {
     }
   }
 
-  console.log('✅ AI routes initialized with full integration support');
+  console.log('✅ AI routes initialized with full integration support and action execution');
 };
