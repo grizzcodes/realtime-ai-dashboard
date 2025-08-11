@@ -32,6 +32,17 @@ const IntegrationService = require('./src/services/integrationService');
 const integrationService = new IntegrationService();
 global.integrationService = integrationService;
 
+// Initialize Supabase if configured
+let supabaseClient = null;
+if (process.env.SUPABASE_URL && process.env.SUPABASE_ANON_KEY) {
+  const { createClient } = require('@supabase/supabase-js');
+  supabaseClient = createClient(
+    process.env.SUPABASE_URL,
+    process.env.SUPABASE_ANON_KEY
+  );
+  console.log('✅ Supabase initialized');
+}
+
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.json({
@@ -60,6 +71,12 @@ if (fs.existsSync(path.join(__dirname, 'api/fireflies.js'))) {
   console.log('🔥 Fireflies API routes loaded');
 }
 
+// Load AI routes with full integration support
+if (fs.existsSync(path.join(__dirname, 'src/routes/aiRoutes.js'))) {
+  require('./src/routes/aiRoutes')(app, io, integrationService, supabaseClient);
+  console.log('🤖 AI routes loaded with memory and context management');
+}
+
 // WebSocket connection handling
 io.on('connection', (socket) => {
   console.log('📱 Client connected:', socket.id);
@@ -75,6 +92,7 @@ server.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`📊 Dashboard: http://localhost:${PORT}/health`);
   console.log('🔗 WebSocket server active');
+  console.log('🤖 AI services ready with memory and modes');
 });
 
 // Graceful shutdown
