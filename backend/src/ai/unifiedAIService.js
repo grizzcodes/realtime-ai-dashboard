@@ -1,13 +1,18 @@
 // backend/src/ai/unifiedAIService.js
-// Unified AI service that handles both OpenAI and Claude with different modes
+// Unified AI service that handles both OpenAI and Claude with different modes and action execution
 
 const OpenAI = require('openai');
 const Anthropic = require('@anthropic-ai/sdk');
+const ActionExecutor = require('./actionExecutor');
 
 class UnifiedAIService {
-  constructor(memoryManager, contextManager) {
+  constructor(memoryManager, contextManager, integrationService) {
     this.memory = memoryManager;
     this.context = contextManager;
+    this.integrations = integrationService;
+    
+    // Initialize action executor
+    this.actionExecutor = new ActionExecutor(integrationService, memoryManager);
     
     // Initialize OpenAI if available
     if (process.env.OPENAI_API_KEY) {
@@ -25,17 +30,20 @@ class UnifiedAIService {
       console.log('✅ Claude initialized');
     }
     
-    // Define AI modes with specific system prompts
+    // Define AI modes with specific system prompts - now with action capabilities
     this.modes = {
       emailResponder: {
         name: 'Email Responder',
-        systemPrompt: `You are an professional email assistant for DGenz. Your responses should be:
-- Professional yet friendly
-- Concise but complete
-- Action-oriented
-- Aware of company context and relationships
-Always consider the sender's history and importance when crafting responses.`,
-        model: 'gpt-4' // or 'claude-3-opus'
+        systemPrompt: `You are an professional email assistant for DGenz with FULL EMAIL ACCESS. You can:
+- Archive, delete, and manage emails directly
+- Draft and send responses
+- Mark emails as read/unread
+- Star important emails
+
+Your responses should be professional yet friendly. When asked to perform email actions, confirm what you're doing.
+Available commands: archive_email, delete_email, draft_reply, send_email, mark_as_read, star_email`,
+        model: 'gpt-4',
+        canExecuteActions: true
       },
       
       creativeIdeas: {
@@ -47,42 +55,51 @@ Always consider the sender's history and importance when crafting responses.`,
 - Propose unique approaches to problems
 - Consider market trends and opportunities
 Be bold, creative, and push boundaries while remaining practical.`,
-        model: 'gpt-4'
+        model: 'gpt-4',
+        canExecuteActions: false
       },
       
       taskManager: {
         name: 'Task Manager',
-        systemPrompt: `You are a productivity assistant managing tasks and projects. You should:
-- Prioritize tasks effectively
-- Break down complex projects
-- Identify dependencies and blockers
-- Suggest optimal task sequences
-- Consider team capacity and deadlines
-Be systematic, organized, and efficiency-focused.`,
-        model: 'gpt-4'
+        systemPrompt: `You are a productivity assistant with FULL TASK MANAGEMENT ACCESS. You can:
+- Create, update, and complete tasks in Notion
+- Assign tasks to team members
+- Set priorities and due dates
+- Push action items from meetings to Notion
+
+When asked to manage tasks, confirm the action you're taking.
+Available commands: create_task, update_task, complete_task, assign_task, push_to_notion`,
+        model: 'gpt-4',
+        canExecuteActions: true
       },
       
       analyst: {
         name: 'Data Analyst',
-        systemPrompt: `You are a data analyst providing insights from integrated systems. You should:
-- Analyze patterns and trends
-- Provide data-driven recommendations
-- Identify potential issues early
-- Generate actionable insights
-- Create comprehensive reports
-Be analytical, precise, and insight-focused.`,
-        model: 'gpt-4'
+        systemPrompt: `You are a data analyst with FULL SYSTEM ACCESS. You can:
+- Analyze email patterns and response times
+- Review task completion rates
+- Generate comprehensive reports
+- Identify trends and anomalies
+
+Available commands: analyze_emails, analyze_tasks, generate_report`,
+        model: 'gpt-4',
+        canExecuteActions: true
       },
       
       assistant: {
         name: 'General Assistant',
-        systemPrompt: `You are a helpful AI assistant for DGenz with access to all company systems. You can:
-- Answer questions about any integrated data
-- Help with various tasks
-- Provide context from emails, tasks, meetings
-- Maintain awareness of team members, clients, and projects
-Be helpful, knowledgeable, and proactive.`,
-        model: 'gpt-4'
+        systemPrompt: `You are a helpful AI assistant for DGenz with FULL SYSTEM ACCESS. You can:
+- Perform ANY action across integrated systems
+- Archive/delete emails
+- Create/manage tasks
+- Schedule meetings
+- Send Slack messages
+- Remember information about clients and team
+
+When asked to perform an action, confirm what you're doing and execute it.
+Available commands: ALL (email, task, calendar, slack, analysis, memory operations)`,
+        model: 'gpt-4',
+        canExecuteActions: true
       }
     };
     
@@ -110,8 +127,12 @@ Be helpful, knowledgeable, and proactive.`,
     // Build the context prompt
     const contextPrompt = this.buildContextPrompt(fullContext);
     
+    // Add action capabilities to system prompt
+    const actionPrompt = modeConfig.canExecuteActions ? 
+      `\n\nIMPORTANT: You have the ability to EXECUTE ACTIONS directly. When the user asks you to do something, actually do it using the available commands, don't just describe what they should do.` : '';
+    
     // Combine system prompt with context
-    const systemPrompt = `${modeConfig.systemPrompt}\n\nCurrent Context:\n${contextPrompt}`;
+    const systemPrompt = `${modeConfig.systemPrompt}${actionPrompt}\n\nCurrent Context:\n${contextPrompt}`;
     
     // Try to get response from AI
     let response = null;
@@ -143,6 +164,17 @@ Be helpful, knowledgeable, and proactive.`,
       usedModel = 'Fallback';
     }
     
+    // Check if we should execute an action
+    let actionResult = null;
+    if (modeConfig.canExecuteActions && !options.skipActions) {
+      actionResult = await this.actionExecutor.parseAndExecute(message, response);
+      
+      // If action was successful, enhance the response
+      if (actionResult && actionResult.success) {
+        response = this.enhanceResponseWithAction(response, actionResult);
+      }
+    }
+    
     // Log the interaction for learning
     const entities = this.memory.extractEntities(message);
     if (entities.clients.length > 0) {
@@ -156,8 +188,21 @@ Be helpful, knowledgeable, and proactive.`,
       mode: modeConfig.name,
       model: usedModel,
       context: fullContext,
+      actionResult: actionResult,
       timestamp: new Date().toISOString()
     };
+  }
+
+  enhanceResponseWithAction(aiResponse, actionResult) {
+    // Add confirmation of the action to the AI response
+    const actionConfirmation = `\n\n✅ **Action Completed**: ${actionResult.message}`;
+    
+    // If the response doesn't already mention the action, add it
+    if (!aiResponse.toLowerCase().includes(actionResult.action.replace('_', ' '))) {
+      return aiResponse + actionConfirmation;
+    }
+    
+    return aiResponse;
   }
 
   async callOpenAI(message, systemPrompt, options = {}) {
@@ -253,6 +298,11 @@ Be helpful, knowledgeable, and proactive.`,
     return responses[mode] || "I'm here to help. Could you provide more details about what you need?";
   }
 
+  // Direct action methods for explicit commands
+  async executeDirectAction(action, params) {
+    return await this.actionExecutor.executeAction(action, params);
+  }
+
   // Special function for email responses
   async generateEmailResponse(emailContext, tone = 'professional') {
     this.setMode('emailResponder');
@@ -334,12 +384,31 @@ Provide:
     return await this.processMessage(prompt, { mode: 'analyst' });
   }
 
+  // Get available actions for current mode
+  getAvailableActions() {
+    const modeConfig = this.modes[this.currentMode];
+    if (!modeConfig.canExecuteActions) {
+      return [];
+    }
+    
+    const modeActions = {
+      emailResponder: ['archive_email', 'delete_email', 'draft_reply', 'send_email', 'mark_as_read', 'star_email'],
+      taskManager: ['create_task', 'update_task', 'complete_task', 'assign_task', 'push_to_notion'],
+      analyst: ['analyze_emails', 'analyze_tasks', 'generate_report'],
+      assistant: Object.keys(this.actionExecutor.actions) // All actions
+    };
+    
+    return modeActions[this.currentMode] || [];
+  }
+
   // Get available modes
   getAvailableModes() {
     return Object.keys(this.modes).map(key => ({
       id: key,
       name: this.modes[key].name,
-      description: this.modes[key].systemPrompt.split('\n')[0]
+      description: this.modes[key].systemPrompt.split('\n')[0],
+      canExecuteActions: this.modes[key].canExecuteActions,
+      availableActions: this.modes[key].canExecuteActions ? this.getAvailableActions() : []
     }));
   }
 
@@ -349,7 +418,9 @@ Provide:
       openai: !!this.openai,
       claude: !!this.anthropic,
       currentMode: this.currentMode,
-      availableModes: this.getAvailableModes()
+      availableModes: this.getAvailableModes(),
+      actionExecutor: true,
+      totalActions: Object.keys(this.actionExecutor.actions).length
     };
   }
 }
