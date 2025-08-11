@@ -13,6 +13,8 @@ async function testFirefliesAPI() {
     console.log('📡 Testing GET /api/fireflies/meetings...');
     const meetingsResponse = await axios.get(`${API_URL}/meetings?limit=5`);
     
+    console.log('Response data:', JSON.stringify(meetingsResponse.data, null, 2));
+    
     if (meetingsResponse.data.success) {
       console.log(`✅ Meetings endpoint working!`);
       console.log(`   Found ${meetingsResponse.data.meetings.length} meetings`);
@@ -31,6 +33,7 @@ async function testFirefliesAPI() {
       }
     } else {
       console.log('❌ Meetings endpoint returned an error');
+      console.log('   Error:', meetingsResponse.data.error);
     }
     
     console.log('\n📡 Testing GET /api/fireflies/action-items...');
@@ -46,12 +49,14 @@ async function testFirefliesAPI() {
       }
     } else {
       console.log('❌ Action items endpoint returned an error');
+      console.log('   Error:', actionItemsResponse.data.error);
     }
     
   } catch (error) {
     console.error('❌ Error testing API:', error.message);
     if (error.response) {
-      console.error('   Response:', error.response.data);
+      console.error('   Response status:', error.response.status);
+      console.error('   Response data:', error.response.data);
     }
     console.log('\n💡 Make sure:');
     console.log('   1. The backend server is running (npm start in backend folder)');
