@@ -22,9 +22,9 @@ class ContextManager {
 
     // Gather current data from integrations
     try {
-      // Get recent emails
-      if (this.integrations.gmailService) {
-        const emails = await this.integrations.gmailService.getLatestEmails(5);
+      // Get recent emails - FIXED: use getLatestEmails instead of gmailService.getLatestEmails
+      if (this.integrations.getLatestEmails) {
+        const emails = await this.integrations.getLatestEmails(5);
         context.currentData.recentEmails = emails.emails || [];
       }
 
