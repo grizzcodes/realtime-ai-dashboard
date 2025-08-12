@@ -198,7 +198,8 @@ class ActionExecutor {
     const dueDatePatterns = [
       /due\s+(tomorrow|today|monday|tuesday|wednesday|thursday|friday|saturday|sunday)/i,
       /due\s+(?:on|by)?\s*(\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?)/i,
-      /by\s+(tomorrow|today|next week|this week|end of day)/i
+      /by\s+(tomorrow|today|next week|this week|end of day)/i,
+      /due\s+for\s+(tomorrow|today)/i  // Added pattern for "due for tomorrow"
     ];
     
     let dueDate = null;
@@ -213,6 +214,9 @@ class ActionExecutor {
     
     // Clean up the title
     title = title.replace(/\s+/g, ' ').trim();
+    
+    // Remove leading hyphens or dashes
+    title = title.replace(/^[-–—]\s*/, '');
     
     // If title is empty or too generic, extract from original message
     if (!title || title.length < 3) {
@@ -453,7 +457,7 @@ class ActionExecutor {
         priority: params.priority || 'Medium',
         assignee: params.assignee || 'Team',
         dueDate: params.dueDate || null,
-        status: 'To-do'
+        status: 'Not started'  // FIXED: Changed from 'To-do' to 'Not started'
       };
       
       const result = await this.integrations.notionService.createTask(taskData);
@@ -541,7 +545,7 @@ class ActionExecutor {
         description: params.description || `From meeting: ${params.source}`,
         assignee: params.assignee || 'Team',
         priority: params.priority || 'Medium',
-        status: 'To-do',
+        status: 'Not started',  // FIXED: Changed from 'To-do' to 'Not started'
         dueDate: params.dueDate || null,
         source: params.source || 'AI Assistant'
       };
