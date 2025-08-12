@@ -6,14 +6,39 @@ class NotionService {
     this.notion = null;
     this.databaseId = process.env.NOTION_DATABASE_ID || '4edf1722-ef48-4cbc-988d-ed770d281f9b';
     this.statusOptions = [];
+    this.validStatuses = null; // Cache valid status options
     
     if (process.env.NOTION_API_KEY) {
       this.notion = new Client({
         auth: process.env.NOTION_API_KEY,
       });
       console.log('✅ NotionService initialized with API key');
+      // Get valid status options on initialization
+      this.getValidStatusOptions();
     } else {
       console.log('⚠️ NotionService: No API key found');
+    }
+  }
+
+  async getValidStatusOptions() {
+    if (!this.notion || !this.databaseId) return [];
+    
+    try {
+      const database = await this.notion.databases.retrieve({
+        database_id: this.databaseId
+      });
+      
+      const statusProperty = database.properties['Status'];
+      if (statusProperty && statusProperty.status) {
+        this.validStatuses = statusProperty.status.options.map(opt => opt.name);
+        console.log('📋 Valid Notion status options:', this.validStatuses);
+        return this.validStatuses;
+      }
+      
+      return [];
+    } catch (error) {
+      console.error('Failed to get status options:', error);
+      return [];
     }
   }
 
@@ -155,7 +180,41 @@ class NotionService {
     }
 
     try {
-      console.log('📝 Creating task in Notion:', taskData);
+      // Ensure we have valid status options
+      if (!this.validStatuses) {
+        await this.getValidStatusOptions();
+      }
+      
+      // Determine the correct status to use
+      let statusToUse = taskData.status || 'Not started';
+      
+      // Map common status names to what might exist in the database
+      const statusMappings = {
+        'To-do': ['To Do', 'To do', 'TODO', 'Todo', 'Not started', 'Backlog', 'New'],
+        'Not started': ['Not started', 'Not Started', 'Backlog', 'To Do', 'To do', 'TODO', 'New'],
+        'In Progress': ['In Progress', 'In progress', 'Working on it', 'Doing'],
+        'Done': ['Done', 'Complete', 'Completed', 'Finished']
+      };
+      
+      // Try to find a matching status from the valid options
+      if (this.validStatuses && this.validStatuses.length > 0) {
+        const mappingOptions = statusMappings[statusToUse] || [statusToUse];
+        
+        for (const option of mappingOptions) {
+          if (this.validStatuses.includes(option)) {
+            statusToUse = option;
+            break;
+          }
+        }
+        
+        // If no match found, use the first available status
+        if (!this.validStatuses.includes(statusToUse)) {
+          statusToUse = this.validStatuses[0];
+          console.log(`⚠️ Using default status: ${statusToUse}`);
+        }
+      }
+      
+      console.log('📝 Creating task in Notion:', { ...taskData, status: statusToUse });
       
       // Build properties based on your database structure
       const properties = {
@@ -171,7 +230,7 @@ class NotionService {
         },
         'Status': {
           status: {
-            name: taskData.status || 'To-do'
+            name: statusToUse
           }
         }
       };
@@ -236,7 +295,7 @@ class NotionService {
       if (error.code === 'validation_error') {
         return {
           success: false,
-          error: 'Database structure mismatch. Check property names and types.'
+          error: `Database validation error: ${error.message}. Valid statuses: ${this.validStatuses?.join(', ') || 'unknown'}`
         };
       } else if (error.code === 'unauthorized') {
         return {
