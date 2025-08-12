@@ -102,24 +102,42 @@ class ActionExecutor {
       };
     }
     
-    // Task-related intents
-    if (message.includes('create task') || message.includes('add task')) {
+    // IMPROVED Task-related intents detection
+    // Check for various task creation patterns
+    if (message.includes('create task') || 
+        message.includes('add task') || 
+        message.includes('add a task') ||
+        message.includes('new task') ||
+        message.includes('make a task') ||
+        (message.includes('task') && (message.includes('add') || message.includes('create')))) {
+      
+      // Extract task details from the message
+      const taskDetails = this.extractTaskDetails(message);
+      
       return {
         action: 'create_task',
-        params: { description: message }
+        params: taskDetails
+      };
+    }
+    
+    // Check for Notion-specific patterns
+    if ((message.includes('notion') && (message.includes('add') || message.includes('create') || message.includes('push'))) ||
+        message.includes('push to notion') || 
+        message.includes('add to notion') ||
+        message.includes('create in notion') ||
+        message.includes('add notion task')) {
+      
+      const taskDetails = this.extractTaskDetails(message);
+      
+      return {
+        action: 'push_to_notion',
+        params: taskDetails
       };
     }
     
     if (message.includes('complete task') || message.includes('mark done')) {
       return {
         action: 'complete_task',
-        params: { description: message }
-      };
-    }
-    
-    if (message.includes('push to notion') || message.includes('add to notion')) {
-      return {
-        action: 'push_to_notion',
         params: { description: message }
       };
     }
@@ -151,6 +169,128 @@ class ActionExecutor {
     }
     
     return null;
+  }
+
+  // New helper method to extract task details from message
+  extractTaskDetails(message) {
+    const details = {
+      description: message
+    };
+    
+    // Extract assignee (looking for "for [name]" or "assign to [name]")
+    const assigneeMatch = message.match(/(?:for|assign to|assigned to)\s+(\w+)/i);
+    if (assigneeMatch) {
+      details.assignee = assigneeMatch[1];
+    }
+    
+    // Extract title from the message
+    let title = message;
+    
+    // Remove common prefixes
+    title = title.replace(/^(add|create|make|push|add a|create a|make a)\s+(task|notion task|to notion)?\s*/i, '');
+    
+    // Remove assignee part if found
+    if (assigneeMatch) {
+      title = title.replace(/(?:for|assign to|assigned to)\s+\w+/i, '');
+    }
+    
+    // Extract due date patterns
+    const dueDatePatterns = [
+      /due\s+(tomorrow|today|monday|tuesday|wednesday|thursday|friday|saturday|sunday)/i,
+      /due\s+(?:on|by)?\s*(\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?)/i,
+      /by\s+(tomorrow|today|next week|this week|end of day)/i
+    ];
+    
+    let dueDate = null;
+    for (const pattern of dueDatePatterns) {
+      const match = message.match(pattern);
+      if (match) {
+        dueDate = this.parseDueDate(match[1]);
+        title = title.replace(match[0], '');
+        break;
+      }
+    }
+    
+    // Clean up the title
+    title = title.replace(/\s+/g, ' ').trim();
+    
+    // If title is empty or too generic, extract from original message
+    if (!title || title.length < 3) {
+      // Try to extract content between quotes if present
+      const quotedMatch = message.match(/["']([^"']+)["']/);
+      if (quotedMatch) {
+        title = quotedMatch[1];
+      } else {
+        // Fallback to a more descriptive extraction
+        title = message
+          .replace(/^.*?(?:task|notion)\s+(?:for\s+)?/i, '')
+          .replace(/\s*(?:due|by|assigned to|for)\s+.*/i, '')
+          .trim();
+      }
+    }
+    
+    details.title = title || 'New Task';
+    
+    if (dueDate) {
+      details.dueDate = dueDate;
+    }
+    
+    // Extract priority if mentioned
+    const priorityMatch = message.match(/\b(urgent|high|medium|low)\s*priority/i);
+    if (priorityMatch) {
+      details.priority = priorityMatch[1].charAt(0).toUpperCase() + priorityMatch[1].slice(1).toLowerCase();
+    }
+    
+    return details;
+  }
+
+  // Helper to parse due dates
+  parseDueDate(dateString) {
+    const today = new Date();
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    
+    const dateMap = {
+      'today': today.toISOString().split('T')[0],
+      'tomorrow': tomorrow.toISOString().split('T')[0],
+      'monday': this.getNextWeekday(1),
+      'tuesday': this.getNextWeekday(2),
+      'wednesday': this.getNextWeekday(3),
+      'thursday': this.getNextWeekday(4),
+      'friday': this.getNextWeekday(5),
+      'saturday': this.getNextWeekday(6),
+      'sunday': this.getNextWeekday(0),
+      'next week': new Date(today.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+      'this week': this.getNextWeekday(5), // Default to Friday
+      'end of day': today.toISOString().split('T')[0]
+    };
+    
+    const lowerDateString = dateString.toLowerCase();
+    if (dateMap[lowerDateString]) {
+      return dateMap[lowerDateString];
+    }
+    
+    // Try to parse actual date formats (MM/DD, MM-DD, MM/DD/YYYY, etc.)
+    try {
+      const parsed = new Date(dateString);
+      if (!isNaN(parsed.getTime())) {
+        return parsed.toISOString().split('T')[0];
+      }
+    } catch (e) {
+      // Ignore parse errors
+    }
+    
+    return null;
+  }
+
+  // Helper to get next occurrence of a weekday
+  getNextWeekday(dayIndex) {
+    const today = new Date();
+    const todayIndex = today.getDay();
+    const daysUntil = (dayIndex - todayIndex + 7) % 7 || 7;
+    const nextDay = new Date(today);
+    nextDay.setDate(today.getDate() + daysUntil);
+    return nextDay.toISOString().split('T')[0];
   }
 
   async executeAction(actionName, params) {
@@ -400,8 +540,9 @@ class ActionExecutor {
         title: params.task || params.title,
         description: params.description || `From meeting: ${params.source}`,
         assignee: params.assignee || 'Team',
-        priority: 'Medium',
+        priority: params.priority || 'Medium',
         status: 'To-do',
+        dueDate: params.dueDate || null,
         source: params.source || 'AI Assistant'
       };
       
@@ -411,7 +552,7 @@ class ActionExecutor {
         success: result.success,
         action: 'task_pushed_to_notion',
         task: result.task,
-        message: `Task pushed to Notion successfully`
+        message: `Task "${taskData.title}" pushed to Notion successfully`
       };
     } catch (error) {
       return { success: false, error: error.message };
