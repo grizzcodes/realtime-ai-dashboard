@@ -30,15 +30,17 @@ const FloatingChatbox = ({ isAdmin = false }) => {
     setIsLoading(true);
 
     try {
-      const response = await fetch('http://localhost:3002/api/ai-chat', {
+      // Changed from /api/ai-chat to /api/ai/chat and from port 3002 to 3001
+      const response = await fetch('http://localhost:3001/api/ai/chat', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
           message: inputValue,
-          model: selectedModel,
-          isAdmin: isAdmin,
+          model: selectedModel === 'gpt4' ? 'assistant' : 'assistant', // Map to AI mode
+          mode: 'assistant', // Use assistant mode for full capabilities
+          executeActions: true, // Enable action execution
           conversationHistory: messages
         })
       });
@@ -50,23 +52,36 @@ const FloatingChatbox = ({ isAdmin = false }) => {
           role: 'assistant',
           content: data.response,
           timestamp: new Date(),
-          actions: data.actions || []
+          actionResult: data.actionResult // Include action results
         };
         
         setMessages(prev => [...prev, assistantMessage]);
         
-        if (data.actions && data.actions.length > 0) {
-          setTimeout(() => {
-            window.location.reload();
-          }, 2000);
+        // Show action result if present
+        if (data.actionResult && data.actionResult.success) {
+          const actionMessage = {
+            role: 'system',
+            content: `✅ Action completed: ${data.actionResult.message}`,
+            timestamp: new Date()
+          };
+          setMessages(prev => [...prev, actionMessage]);
+          
+          // Refresh page if task was created
+          if (data.actionResult.action === 'task_created' || 
+              data.actionResult.action === 'task_pushed_to_notion') {
+            setTimeout(() => {
+              window.location.reload();
+            }, 2000);
+          }
         }
       } else {
-        throw new Error(data.error);
+        throw new Error(data.error || 'Failed to get response');
       }
     } catch (error) {
+      console.error('Chat error:', error);
       const errorMessage = {
         role: 'assistant',
-        content: `Sorry, I encountered an error: ${error.message}`,
+        content: `Sorry, I encountered an error: ${error.message}. Make sure the backend is running on port 3001.`,
         timestamp: new Date()
       };
       setMessages(prev => [...prev, errorMessage]);
@@ -98,8 +113,8 @@ const FloatingChatbox = ({ isAdmin = false }) => {
               }
             }}
             onFocus={() => setIsOpen(true)}
-            placeholder="Ask AI anything..."
-            className="bg-transparent text-white placeholder-gray-300 outline-none w-80"
+            placeholder="Ask AI to manage tasks, analyze meetings, or help with projects..."
+            className="bg-transparent text-white placeholder-gray-300 outline-none w-96"
           />
         </div>
       ) : (
@@ -132,20 +147,23 @@ const FloatingChatbox = ({ isAdmin = false }) => {
           <div className="p-4 h-64 overflow-y-auto">
             {messages.length === 0 && (
               <div className="text-center text-white/70 text-sm">
-                Start a conversation...
+                Try: "Add a task for John - Review proposal, due tomorrow"
               </div>
             )}
             {messages.map((message, index) => (
               <div
                 key={index}
                 className={`mb-3 ${
-                  message.role === 'user' ? 'text-right' : 'text-left'
+                  message.role === 'user' ? 'text-right' : 
+                  message.role === 'system' ? 'text-center' : 'text-left'
                 }`}
               >
                 <div
                   className={`inline-block max-w-[80%] p-3 rounded-lg text-sm ${
                     message.role === 'user'
                       ? 'bg-blue-500/30 text-white border border-blue-400/30'
+                      : message.role === 'system'
+                      ? 'bg-green-500/20 text-green-300 border border-green-400/30'
                       : 'bg-white/20 text-white border border-white/30'
                   }`}
                 >
