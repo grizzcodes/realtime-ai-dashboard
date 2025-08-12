@@ -7,6 +7,7 @@ class NotionService {
     this.databaseId = process.env.NOTION_DATABASE_ID || '4edf1722-ef48-4cbc-988d-ed770d281f9b';
     this.statusOptions = [];
     this.validStatuses = null; // Cache valid status options
+    this.workspaceUsers = null; // Cache workspace users
     
     if (process.env.NOTION_API_KEY) {
       this.notion = new Client({
@@ -15,9 +16,65 @@ class NotionService {
       console.log('✅ NotionService initialized with API key');
       // Get valid status options on initialization
       this.getValidStatusOptions();
+      // Get workspace users on initialization
+      this.getWorkspaceUsers();
     } else {
       console.log('⚠️ NotionService: No API key found');
     }
+  }
+
+  async getWorkspaceUsers() {
+    if (!this.notion) return {};
+    
+    try {
+      const response = await this.notion.users.list();
+      this.workspaceUsers = {};
+      
+      response.results.forEach(user => {
+        if (user.type === 'person' && user.name) {
+          // Store multiple variations of the name for matching
+          const firstName = user.name.split(' ')[0].toLowerCase();
+          const fullName = user.name.toLowerCase();
+          
+          this.workspaceUsers[firstName] = user.id;
+          this.workspaceUsers[fullName] = user.id;
+          
+          // Also store the original case
+          this.workspaceUsers[user.name] = user.id;
+          
+          console.log(`👤 Found Notion user: ${user.name} (${user.id})`);
+        }
+      });
+      
+      // Also add any hardcoded mappings from environment variables
+      if (process.env.NOTION_USER_MAPPINGS) {
+        try {
+          const mappings = JSON.parse(process.env.NOTION_USER_MAPPINGS);
+          Object.assign(this.workspaceUsers, mappings);
+        } catch (e) {
+          console.log('Could not parse NOTION_USER_MAPPINGS');
+        }
+      }
+      
+      console.log('📋 Workspace users loaded:', Object.keys(this.workspaceUsers));
+      return this.workspaceUsers;
+    } catch (error) {
+      console.error('Failed to get workspace users:', error);
+      return {};
+    }
+  }
+
+  getUserIdFromName(name) {
+    if (!name || !this.workspaceUsers) return null;
+    
+    // Try different variations of the name
+    const nameLower = name.toLowerCase();
+    const nameCapitalized = name.charAt(0).toUpperCase() + name.slice(1).toLowerCase();
+    
+    return this.workspaceUsers[nameLower] || 
+           this.workspaceUsers[name] || 
+           this.workspaceUsers[nameCapitalized] || 
+           null;
   }
 
   async getValidStatusOptions() {
@@ -58,10 +115,14 @@ class NotionService {
         database_id: this.databaseId
       });
       
+      // Get workspace users
+      await this.getWorkspaceUsers();
+      
       return {
         success: true,
         message: `Connected to Notion database: ${database.title[0]?.plain_text || 'Untitled'}`,
-        databaseId: this.databaseId
+        databaseId: this.databaseId,
+        workspaceUsers: Object.keys(this.workspaceUsers || {})
       };
     } catch (error) {
       return {
@@ -185,6 +246,11 @@ class NotionService {
         await this.getValidStatusOptions();
       }
       
+      // Ensure we have workspace users
+      if (!this.workspaceUsers) {
+        await this.getWorkspaceUsers();
+      }
+      
       // Determine the correct status to use
       let statusToUse = taskData.status || 'Not started';
       
@@ -244,11 +310,29 @@ class NotionService {
         };
       }
       
-      // Add assignee if provided and it's not "Team" or "Unassigned"
+      // Add assignee if provided and we can find their user ID
       if (taskData.assignee && taskData.assignee !== 'Team' && taskData.assignee !== 'Unassigned') {
-        // For people property, we need to search for the user first
-        // For now, we'll skip this as it requires user ID
-        console.log(`Note: Cannot auto-assign to ${taskData.assignee} - requires user ID`);
+        const userId = this.getUserIdFromName(taskData.assignee);
+        
+        if (userId) {
+          properties['Assigned'] = {
+            people: [{ id: userId }]
+          };
+          console.log(`✅ Assigning task to ${taskData.assignee} (${userId})`);
+        } else {
+          console.log(`⚠️ Could not find user ID for ${taskData.assignee}`);
+          // Create a note in the task description about the assignee
+          const descriptionText = `Assigned to: ${taskData.assignee}\n${taskData.description || ''}`;
+          properties['Description'] = {
+            rich_text: [
+              {
+                text: {
+                  content: descriptionText
+                }
+              }
+            ]
+          };
+        }
       }
       
       // Add due date if provided
@@ -284,7 +368,8 @@ class NotionService {
         task: {
           id: response.id,
           title: taskData.title,
-          url: response.url
+          url: response.url,
+          assignee: taskData.assignee
         }
       };
       
@@ -361,6 +446,14 @@ class NotionService {
       console.error('Failed to get status options:', error);
       return [];
     }
+  }
+
+  // Get list of workspace users with their IDs
+  async listWorkspaceUsers() {
+    if (!this.workspaceUsers) {
+      await this.getWorkspaceUsers();
+    }
+    return this.workspaceUsers;
   }
 }
 
