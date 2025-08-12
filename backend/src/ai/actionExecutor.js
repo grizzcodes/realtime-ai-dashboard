@@ -109,6 +109,8 @@ class ActionExecutor {
         message.includes('add a task') ||
         message.includes('new task') ||
         message.includes('make a task') ||
+        message.includes("let's create a task") ||
+        message.includes("lets create a task") ||
         (message.includes('task') && (message.includes('add') || message.includes('create')))) {
       
       // Extract task details from the message
@@ -181,12 +183,15 @@ class ActionExecutor {
     const assigneeMatch = message.match(/(?:for|assign to|assigned to)\s+(\w+)/i);
     if (assigneeMatch) {
       details.assignee = assigneeMatch[1];
+      // Capitalize first letter
+      details.assignee = details.assignee.charAt(0).toUpperCase() + details.assignee.slice(1).toLowerCase();
     }
     
     // Extract title from the message
     let title = message;
     
-    // Remove common prefixes
+    // Remove common prefixes more thoroughly
+    title = title.replace(/^(let's|lets|let us|please|can you|could you|would you)\s+/i, '');
     title = title.replace(/^(add|create|make|push|add a|create a|make a)\s+(task|notion task|to notion)?\s*/i, '');
     
     // Remove assignee part if found
@@ -199,7 +204,8 @@ class ActionExecutor {
       /due\s+(tomorrow|today|monday|tuesday|wednesday|thursday|friday|saturday|sunday)/i,
       /due\s+(?:on|by)?\s*(\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?)/i,
       /by\s+(tomorrow|today|next week|this week|end of day)/i,
-      /due\s+for\s+(tomorrow|today)/i  // Added pattern for "due for tomorrow"
+      /due\s+for\s+(tomorrow|today)/i,  // Pattern for "due for tomorrow"
+      /,?\s*due\s+(tomorrow|today)/i    // Pattern for ", due tomorrow"
     ];
     
     let dueDate = null;
@@ -215,8 +221,11 @@ class ActionExecutor {
     // Clean up the title
     title = title.replace(/\s+/g, ' ').trim();
     
-    // Remove leading hyphens or dashes
-    title = title.replace(/^[-–—]\s*/, '');
+    // Remove leading/trailing hyphens, dashes, colons, or commas
+    title = title.replace(/^[-–—:,\s]+/, '').replace(/[-–—:,\s]+$/, '');
+    
+    // If title starts with "a task", remove it
+    title = title.replace(/^a\s+task\s*/i, '');
     
     // If title is empty or too generic, extract from original message
     if (!title || title.length < 3) {
@@ -225,13 +234,22 @@ class ActionExecutor {
       if (quotedMatch) {
         title = quotedMatch[1];
       } else {
-        // Fallback to a more descriptive extraction
-        title = message
-          .replace(/^.*?(?:task|notion)\s+(?:for\s+)?/i, '')
-          .replace(/\s*(?:due|by|assigned to|for)\s+.*/i, '')
-          .trim();
+        // Fallback to extracting the main content
+        const parts = message.split(/[-–—]/);
+        if (parts.length > 1) {
+          // Use the part after the dash
+          title = parts[1].trim();
+          // Remove due date from this part too
+          for (const pattern of dueDatePatterns) {
+            title = title.replace(pattern, '');
+          }
+          title = title.trim();
+        }
       }
     }
+    
+    // Final cleanup
+    title = title.replace(/^[-–—:,\s]+/, '').replace(/[-–—:,\s]+$/, '').trim();
     
     details.title = title || 'New Task';
     
@@ -457,7 +475,7 @@ class ActionExecutor {
         priority: params.priority || 'Medium',
         assignee: params.assignee || 'Team',
         dueDate: params.dueDate || null,
-        status: 'Not started'  // FIXED: Changed from 'To-do' to 'Not started'
+        status: 'Not started'  // Will be auto-mapped by NotionService
       };
       
       const result = await this.integrations.notionService.createTask(taskData);
@@ -545,7 +563,7 @@ class ActionExecutor {
         description: params.description || `From meeting: ${params.source}`,
         assignee: params.assignee || 'Team',
         priority: params.priority || 'Medium',
-        status: 'Not started',  // FIXED: Changed from 'To-do' to 'Not started'
+        status: 'Not started',  // Will be auto-mapped by NotionService
         dueDate: params.dueDate || null,
         source: params.source || 'AI Assistant'
       };
