@@ -111,7 +111,8 @@ class ActionExecutor {
         message.includes('make a task') ||
         message.includes("let's create a task") ||
         message.includes("lets create a task") ||
-        (message.includes('task') && (message.includes('add') || message.includes('create')))) {
+        message.includes('make a new task') ||
+        (message.includes('task') && (message.includes('add') || message.includes('create') || message.includes('make')))) {
       
       // Extract task details from the message
       const taskDetails = this.extractTaskDetails(message);
@@ -187,25 +188,33 @@ class ActionExecutor {
       details.assignee = details.assignee.charAt(0).toUpperCase() + details.assignee.slice(1).toLowerCase();
     }
     
-    // Extract title from the message
+    // IMPROVED: Extract the actual task content after the dash
     let title = message;
     
-    // Remove common prefixes more thoroughly
-    title = title.replace(/^(let's|lets|let us|please|can you|could you|would you)\s+/i, '');
-    title = title.replace(/^(add|create|make|push|add a|create a|make a)\s+(task|notion task|to notion)?\s*/i, '');
-    
-    // Remove assignee part if found
-    if (assigneeMatch) {
-      title = title.replace(/(?:for|assign to|assigned to)\s+\w+/i, '');
+    // First, check if there's a dash separator - everything after dash is the task
+    if (message.includes('-')) {
+      const parts = message.split('-');
+      if (parts.length >= 2) {
+        // Take everything after the first dash as the title
+        title = parts.slice(1).join('-').trim();
+      }
+    } else {
+      // If no dash, clean up the prefixes
+      title = title.replace(/^(let's|lets|let us|please|can you|could you|would you)\s+/i, '');
+      title = title.replace(/^(add|create|make|push|add a|create a|make a)\s+(a\s+)?(new\s+)?(task|notion task|to notion)?\s*/i, '');
+      
+      // Remove assignee part if found
+      if (assigneeMatch) {
+        title = title.replace(/(?:for|assign to|assigned to)\s+\w+/i, '');
+      }
     }
     
-    // Extract due date patterns
+    // Extract due date patterns and remove them from title
     const dueDatePatterns = [
-      /due\s+(tomorrow|today|monday|tuesday|wednesday|thursday|friday|saturday|sunday)/i,
-      /due\s+(?:on|by)?\s*(\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?)/i,
-      /by\s+(tomorrow|today|next week|this week|end of day)/i,
-      /due\s+for\s+(tomorrow|today)/i,  // Pattern for "due for tomorrow"
-      /,?\s*due\s+(tomorrow|today)/i    // Pattern for ", due tomorrow"
+      /\s*,?\s*due\s+(tomorrow|today|monday|tuesday|wednesday|thursday|friday|saturday|sunday)/i,
+      /\s*,?\s*due\s+(?:on|by)?\s*(\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?)/i,
+      /\s*,?\s*by\s+(tomorrow|today|next week|this week|end of day)/i,
+      /\s*,?\s*due\s+for\s+(tomorrow|today)/i
     ];
     
     let dueDate = null;
@@ -213,43 +222,23 @@ class ActionExecutor {
       const match = message.match(pattern);
       if (match) {
         dueDate = this.parseDueDate(match[1]);
-        title = title.replace(match[0], '');
+        // Remove the due date from the title
+        title = title.replace(pattern, '');
         break;
       }
     }
     
-    // Clean up the title
-    title = title.replace(/\s+/g, ' ').trim();
-    
-    // Remove leading/trailing hyphens, dashes, colons, or commas
-    title = title.replace(/^[-–—:,\s]+/, '').replace(/[-–—:,\s]+$/, '');
-    
-    // If title starts with "a task", remove it
-    title = title.replace(/^a\s+task\s*/i, '');
-    
-    // If title is empty or too generic, extract from original message
-    if (!title || title.length < 3) {
-      // Try to extract content between quotes if present
-      const quotedMatch = message.match(/["']([^"']+)["']/);
-      if (quotedMatch) {
-        title = quotedMatch[1];
-      } else {
-        // Fallback to extracting the main content
-        const parts = message.split(/[-–—]/);
-        if (parts.length > 1) {
-          // Use the part after the dash
-          title = parts[1].trim();
-          // Remove due date from this part too
-          for (const pattern of dueDatePatterns) {
-            title = title.replace(pattern, '');
-          }
-          title = title.trim();
-        }
-      }
-    }
-    
     // Final cleanup
-    title = title.replace(/^[-–—:,\s]+/, '').replace(/[-–—:,\s]+$/, '').trim();
+    title = title.trim();
+    // Remove any trailing commas, dashes, or colons
+    title = title.replace(/[,\-:\s]+$/, '').trim();
+    // Remove any leading commas, dashes, or colons
+    title = title.replace(/^[,\-:\s]+/, '').trim();
+    
+    // Capitalize first letter of the title
+    if (title) {
+      title = title.charAt(0).toUpperCase() + title.slice(1);
+    }
     
     details.title = title || 'New Task';
     
