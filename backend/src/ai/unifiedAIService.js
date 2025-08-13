@@ -232,8 +232,8 @@ Available commands: ALL (email, task, calendar, slack, analysis, memory operatio
         params.title = this.shortTermMemory.lastTaskDescription;
       } else if (this.pendingTasks.length > 0) {
         const lastTask = this.pendingTasks[this.pendingTasks.length - 1];
-        // Extract title from the task mention
-        const taskMatch = lastTask.raw.match(/(?:task|todo)[^.!?-:]*([-:]\s*)?(.+)/i);
+        // Extract title from the task mention - FIXED REGEX
+        const taskMatch = lastTask.raw.match(/(?:task|todo)[^.!?\-:]*([\-:]\s*)?(.+)/i);
         if (taskMatch && taskMatch[2]) {
           params.title = taskMatch[2].trim();
         }
