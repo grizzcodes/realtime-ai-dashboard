@@ -174,7 +174,7 @@ class ActionExecutor {
     return null;
   }
 
-  // New helper method to extract task details from message
+  // IMPROVED: Extract task details with better contextual understanding
   extractTaskDetails(message) {
     const details = {
       description: message
@@ -188,7 +188,7 @@ class ActionExecutor {
       details.assignee = details.assignee.charAt(0).toUpperCase() + details.assignee.slice(1).toLowerCase();
     }
     
-    // IMPROVED: Extract the actual task content after the dash
+    // IMPROVED: Better title extraction with contextual understanding
     let title = message;
     
     // First, check if there's a dash separator - everything after dash is the task
@@ -199,13 +199,41 @@ class ActionExecutor {
         title = parts.slice(1).join('-').trim();
       }
     } else {
-      // If no dash, clean up the prefixes
-      title = title.replace(/^(let's|lets|let us|please|can you|could you|would you)\s+/i, '');
-      title = title.replace(/^(add|create|make|push|add a|create a|make a)\s+(a\s+)?(new\s+)?(task|notion task|to notion)?\s*/i, '');
+      // Clean up common task creation phrases
+      const taskPhrases = [
+        /^(let's|lets|let us)\s+(create|make|add)\s+(a\s+)?(new\s+)?task\s*/i,
+        /^(please|can you|could you|would you)\s+(create|make|add)\s+(a\s+)?(new\s+)?task\s*/i,
+        /^(create|make|add)\s+(a\s+)?(new\s+)?task\s*/i,
+        /^(new\s+)?task\s*[:]\s*/i,
+        /^add\s+to\s+notion\s*[:]\s*/i
+      ];
+      
+      for (const phrase of taskPhrases) {
+        title = title.replace(phrase, '');
+      }
       
       // Remove assignee part if found
       if (assigneeMatch) {
-        title = title.replace(/(?:for|assign to|assigned to)\s+\w+/i, '');
+        title = title.replace(/(?:for|assign to|assigned to)\s+\w+\s*[-:]?\s*/i, '');
+      }
+    }
+    
+    // Extract task type if mentioned
+    const typePatterns = [
+      /\b(type|category):\s*(\w+)/i,
+      /\b(design|development|marketing|research|admin|meeting)\s+task/i,
+      /\btask\s+type:\s*(\w+)/i
+    ];
+    
+    let taskType = null;
+    for (const pattern of typePatterns) {
+      const match = title.match(pattern);
+      if (match) {
+        taskType = match[2] || match[1];
+        taskType = taskType.charAt(0).toUpperCase() + taskType.slice(1).toLowerCase();
+        // Remove type from title
+        title = title.replace(match[0], '');
+        break;
       }
     }
     
@@ -214,7 +242,8 @@ class ActionExecutor {
       /\s*,?\s*due\s+(tomorrow|today|monday|tuesday|wednesday|thursday|friday|saturday|sunday)/i,
       /\s*,?\s*due\s+(?:on|by)?\s*(\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?)/i,
       /\s*,?\s*by\s+(tomorrow|today|next week|this week|end of day)/i,
-      /\s*,?\s*due\s+for\s+(tomorrow|today)/i
+      /\s*,?\s*due\s+for\s+(tomorrow|today)/i,
+      /\s*,?\s*deadline:\s*(\S+)/i
     ];
     
     let dueDate = null;
@@ -228,16 +257,35 @@ class ActionExecutor {
       }
     }
     
+    // Extract priority if mentioned
+    const priorityMatch = message.match(/\b(urgent|high|medium|low)\s*priority/i);
+    if (priorityMatch) {
+      details.priority = priorityMatch[1].charAt(0).toUpperCase() + priorityMatch[1].slice(1).toLowerCase();
+      // Remove priority from title
+      title = title.replace(priorityMatch[0], '');
+    }
+    
     // Final cleanup
     title = title.trim();
-    // Remove any trailing commas, dashes, or colons
-    title = title.replace(/[,\-:\s]+$/, '').trim();
-    // Remove any leading commas, dashes, or colons
-    title = title.replace(/^[,\-:\s]+/, '').trim();
+    // Remove any trailing/leading punctuation and extra words
+    title = title.replace(/^[,\-:\s]+/, '').replace(/[,\-:\s]+$/, '');
     
-    // Capitalize first letter of the title
+    // Remove redundant task words if they appear at the beginning
+    title = title.replace(/^(a\s+)?(new\s+)?task\s+/i, '');
+    
+    // Smart capitalization - capitalize first letter of actual content
     if (title) {
       title = title.charAt(0).toUpperCase() + title.slice(1);
+    }
+    
+    // If title is still generic or contains "task", try to extract better content
+    if (title.toLowerCase().includes('task') && title.split(' ').length <= 3) {
+      // Look for actual task content in the original message
+      const contentMatch = message.match(/[-:]\s*(.+?)(?:\s*due|\s*for|\s*by|$)/i);
+      if (contentMatch && contentMatch[1]) {
+        title = contentMatch[1].trim();
+        title = title.charAt(0).toUpperCase() + title.slice(1);
+      }
     }
     
     details.title = title || 'New Task';
@@ -246,10 +294,8 @@ class ActionExecutor {
       details.dueDate = dueDate;
     }
     
-    // Extract priority if mentioned
-    const priorityMatch = message.match(/\b(urgent|high|medium|low)\s*priority/i);
-    if (priorityMatch) {
-      details.priority = priorityMatch[1].charAt(0).toUpperCase() + priorityMatch[1].slice(1).toLowerCase();
+    if (taskType) {
+      details.type = taskType;
     }
     
     return details;
@@ -464,6 +510,7 @@ class ActionExecutor {
         priority: params.priority || 'Medium',
         assignee: params.assignee || 'Team',
         dueDate: params.dueDate || null,
+        type: params.type || null,  // Add type field
         status: 'Not started'  // Will be auto-mapped by NotionService
       };
       
@@ -554,6 +601,7 @@ class ActionExecutor {
         priority: params.priority || 'Medium',
         status: 'Not started',  // Will be auto-mapped by NotionService
         dueDate: params.dueDate || null,
+        type: params.type || null,
         source: params.source || 'AI Assistant'
       };
       
