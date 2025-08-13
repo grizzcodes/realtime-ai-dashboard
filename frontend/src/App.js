@@ -50,7 +50,9 @@ const App = () => {
           ...task,
           // Use assignee from backend (not assignedTo) and DON'T override with random
           assignedTo: task.assignee || task.assignedTo || 'Unassigned',
-          dueDate: task.dueDate || task.deadline || null
+          dueDate: task.dueDate || task.deadline || null,
+          type: task.type || null,  // Add type field
+          brandProject: task.brandProject || null  // Add brand/project field
         }));
       
       // Extract unique assignees from actual Notion data
@@ -693,6 +695,11 @@ const App = () => {
                             <h4 className="font-medium">{task.title || task.name}</h4>
                             <div className="flex items-center gap-3 mt-2 text-xs opacity-70">
                               <span>👤 {task.assignedTo}</span>
+                              {task.type && (
+                                <span className="px-2 py-0.5 bg-purple-500 bg-opacity-20 rounded">
+                                  🏷️ {task.type}
+                                </span>
+                              )}
                               {task.dueDate && (
                                 <span>📅 {new Date(task.dueDate).toLocaleDateString()}</span>
                               )}
@@ -719,7 +726,7 @@ const App = () => {
                 </>
               }
             >
-              {/* Collapsed view - SHOWING AT LEAST 10 TASKS */}
+              {/* Collapsed view - SHOWING TASKS WITH TYPE AND DUE DATE */}
               <div className="flex items-center gap-3 mb-4">
                 <div className="relative">
                   <button
@@ -765,14 +772,24 @@ const App = () => {
                       <div className="flex justify-between items-start">
                         <div className="flex-1">
                           <h4 className="font-medium text-sm">{task.title || task.name}</h4>
-                          <div className="text-xs opacity-70 mt-1">
-                            👤 {task.assignedTo}
+                          <div className="flex items-center gap-2 text-xs opacity-70 mt-1">
+                            <span>👤 {task.assignedTo}</span>
                             {task.priority && (
-                              <span className={`ml-2 px-1 py-0.5 rounded text-xs priority-${
+                              <span className={`px-1 py-0.5 rounded text-xs priority-${
                                 task.priority === 'High' ? 'high' :
                                 task.priority === 'Medium' ? 'medium' : 'low'
                               }`}>
                                 {task.priority}
+                              </span>
+                            )}
+                            {task.type && (
+                              <span className="px-1.5 py-0.5 bg-purple-500 bg-opacity-20 rounded">
+                                {task.type}
+                              </span>
+                            )}
+                            {task.dueDate && (
+                              <span className="text-yellow-400">
+                                {new Date(task.dueDate).toLocaleDateString()}
                               </span>
                             )}
                           </div>
