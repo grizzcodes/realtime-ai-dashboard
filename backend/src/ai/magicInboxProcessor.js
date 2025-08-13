@@ -1,4 +1,4 @@
-// backend/src/ai/magicInboxProcessor.js - AI-powered inbox intelligence
+// backend/src/ai/magicInboxProcessor.js - AI-powered inbox intelligence PERSONALIZED
 const OpenAI = require('openai');
 const Anthropic = require('@anthropic-ai/sdk');
 
@@ -9,6 +9,9 @@ class MagicInboxProcessor {
     this.anthropic = services.claudeKey ? new Anthropic({ apiKey: services.claudeKey }) : null;
     this.cache = null;
     this.cacheExpiry = null;
+    
+    // Get current user from environment or default to Alec
+    this.currentUser = process.env.CURRENT_USER || 'Alec';
   }
 
   async getCachedMagicInbox() {
@@ -25,13 +28,13 @@ class MagicInboxProcessor {
   }
 
   async generateMagicInbox() {
-    console.log('🔮 Generating real-time Magic AI Inbox...');
+    console.log(`🔮 Generating personalized Magic AI Inbox for ${this.currentUser}...`);
     
     try {
       // Gather all data sources in parallel
       const [emails, tasks, meetings, calendar] = await Promise.all([
         this.getRecentEmails(),
-        this.getRecentTasks(),
+        this.getMyTasks(), // Changed to get tasks assigned to current user
         this.getRecentMeetings(),
         this.getUpcomingCalendar()
       ]);
@@ -49,6 +52,7 @@ class MagicInboxProcessor {
           success: true,
           data: analysis,
           metadata: {
+            user: this.currentUser,
             totalEmails: emails.length,
             totalTasks: tasks.length,
             totalMeetings: meetings.length,
@@ -73,6 +77,7 @@ class MagicInboxProcessor {
       if (!this.services.gmail) return [];
       
       const emails = await this.services.gmail.getLatestEmails(10);
+      // Filter for emails that might be to/from current user
       return emails.emails || [];
     } catch (error) {
       console.log('📧 Gmail not connected:', error.message);
@@ -80,12 +85,25 @@ class MagicInboxProcessor {
     }
   }
 
-  async getRecentTasks() {
+  async getMyTasks() {
     try {
       if (!this.services.notion) return [];
       
-      const tasks = await this.services.notion.syncDatabase();
-      return tasks.tasks || [];
+      // Get ALL tasks from Notion
+      const result = await this.services.notion.getTasks();
+      const allTasks = result.tasks || [];
+      
+      // Filter tasks assigned to current user
+      const myTasks = allTasks.filter(task => {
+        // Check if task is assigned to current user
+        const assignee = task.assignee || task.assignedTo || '';
+        return assignee.toLowerCase().includes(this.currentUser.toLowerCase()) ||
+               assignee === 'Team' || // Include team tasks
+               assignee === 'Unassigned'; // Include unassigned tasks
+      });
+      
+      console.log(`📋 Found ${myTasks.length} tasks for ${this.currentUser}`);
+      return myTasks;
     } catch (error) {
       console.log('📝 Notion not connected:', error.message);
       return [];
@@ -106,8 +124,11 @@ class MagicInboxProcessor {
 
   async getUpcomingCalendar() {
     try {
-      // Calendar integration would go here
-      return [];
+      // Get calendar events if available
+      if (!this.services.calendar) return [];
+      
+      const events = await this.services.calendar.getUpcomingEvents(7);
+      return events.events || [];
     } catch (error) {
       console.log('📅 Calendar not connected:', error.message);
       return [];
@@ -117,12 +138,27 @@ class MagicInboxProcessor {
   async analyzeWithAI(data) {
     const { emails, tasks, meetings, calendar } = data;
 
-    // Build context for AI
+    // Build personalized context
     const context = {
       unreadEmails: emails.filter(e => e.isUnread).slice(0, 5),
-      urgentTasks: tasks.filter(t => t.priority === 'High' || t.priority === 'Urgent').slice(0, 5),
-      upcomingMeetings: meetings.slice(0, 3),
-      overdueTasks: tasks.filter(t => t.dueDate && new Date(t.dueDate) < new Date()).slice(0, 5)
+      myUrgentTasks: tasks.filter(t => 
+        (t.priority === 'High' || t.priority === 'Urgent') && 
+        t.status !== 'Done' && 
+        t.status !== 'Completed'
+      ).slice(0, 5),
+      myUpcomingTasks: tasks.filter(t => 
+        t.dueDate && 
+        new Date(t.dueDate) >= new Date() &&
+        t.status !== 'Done' && 
+        t.status !== 'Completed'
+      ).sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate)).slice(0, 5),
+      myOverdueTasks: tasks.filter(t => 
+        t.dueDate && 
+        new Date(t.dueDate) < new Date() &&
+        t.status !== 'Done' && 
+        t.status !== 'Completed'
+      ).slice(0, 5),
+      upcomingMeetings: meetings.slice(0, 3)
     };
 
     // Generate intelligent suggestions based on real data
@@ -131,64 +167,92 @@ class MagicInboxProcessor {
     const upcomingTasks = [];
     const waitingOn = [];
 
-    // Process emails for reply suggestions
+    // PERSONALIZED: Process emails that need your attention
     context.unreadEmails.forEach(email => {
       if (email.from && email.subject) {
-        replySuggestions.push(`${email.from.split('<')[0].trim()}: ${email.subject}`);
-      }
-    });
-
-    // Process tasks for quick wins and upcoming
-    tasks.forEach(task => {
-      if (task.priority === 'Low' && task.status !== 'Done') {
-        quickWins.push(task.title || task.name);
-      } else if (task.dueDate && task.status !== 'Done') {
-        const dueDate = new Date(task.dueDate);
-        const today = new Date();
-        const diffDays = Math.ceil((dueDate - today) / (1000 * 60 * 60 * 24));
-        
-        if (diffDays >= 0 && diffDays <= 7) {
-          upcomingTasks.push(`${task.title || task.name} (Due in ${diffDays} days)`);
+        // Check if email mentions current user or is high priority
+        if (email.snippet?.toLowerCase().includes(this.currentUser.toLowerCase()) ||
+            email.subject?.toLowerCase().includes('urgent') ||
+            email.subject?.toLowerCase().includes('asap')) {
+          replySuggestions.push(`📧 ${email.from.split('<')[0].trim()}: ${email.subject}`);
         }
       }
-      
-      // Check for tasks waiting on others
-      if (task.status === 'Blocked' || task.status === 'Waiting') {
-        waitingOn.push(task.title || task.name);
+    });
+
+    // PERSONALIZED: Your quick wins (tasks you can complete quickly)
+    tasks.forEach(task => {
+      // Quick wins are your low priority or small tasks
+      if ((task.priority === 'Low' || task.priority === 'Medium') && 
+          task.status !== 'Done' && 
+          task.status !== 'Completed') {
+        quickWins.push(`✅ ${task.title || task.name}`);
       }
     });
 
-    // Process meetings for action items
+    // PERSONALIZED: Your upcoming deadlines
+    context.myUpcomingTasks.forEach(task => {
+      const dueDate = new Date(task.dueDate);
+      const today = new Date();
+      const diffDays = Math.ceil((dueDate - today) / (1000 * 60 * 60 * 24));
+      
+      let urgencyEmoji = '📅';
+      if (diffDays === 0) urgencyEmoji = '🔴';
+      else if (diffDays === 1) urgencyEmoji = '🟡';
+      else if (diffDays <= 3) urgencyEmoji = '🟠';
+      
+      upcomingTasks.push(`${urgencyEmoji} ${task.title || task.name} (${diffDays === 0 ? 'Due TODAY' : diffDays === 1 ? 'Due TOMORROW' : `Due in ${diffDays} days`})`);
+    });
+
+    // PERSONALIZED: Show overdue tasks first if any
+    context.myOverdueTasks.forEach(task => {
+      const dueDate = new Date(task.dueDate);
+      const today = new Date();
+      const diffDays = Math.ceil((today - dueDate) / (1000 * 60 * 60 * 24));
+      
+      waitingOn.push(`⚠️ OVERDUE: ${task.title || task.name} (${diffDays} days overdue)`);
+    });
+
+    // Check for blocked tasks
+    tasks.filter(t => t.status === 'Blocked' || t.status === 'Waiting').forEach(task => {
+      waitingOn.push(`⏸️ Blocked: ${task.title || task.name}`);
+    });
+
+    // Process meetings for YOUR action items
     meetings.forEach(meeting => {
       if (meeting.actionItems && meeting.actionItems.length > 0) {
         meeting.actionItems.slice(0, 2).forEach(item => {
-          if (typeof item === 'string') {
-            quickWins.push(`From ${meeting.title}: ${item}`);
-          } else if (item.task) {
-            quickWins.push(`From ${meeting.title}: ${item.task}`);
+          const actionText = typeof item === 'string' ? item : item.task;
+          if (actionText) {
+            // Check if action item mentions current user
+            if (actionText.toLowerCase().includes(this.currentUser.toLowerCase())) {
+              quickWins.push(`📝 From ${meeting.title}: ${actionText}`);
+            }
           }
         });
       }
     });
 
-    // Use AI for more intelligent analysis if available
-    if (this.openai || this.anthropic) {
-      try {
-        const aiAnalysis = await this.getAIAnalysis(context);
-        if (aiAnalysis) {
-          return {
-            replySuggestions: aiAnalysis.replySuggestions || replySuggestions.slice(0, 3),
-            quickWins: aiAnalysis.quickWins || quickWins.slice(0, 3),
-            upcomingTasks: aiAnalysis.upcomingTasks || upcomingTasks.slice(0, 3),
-            waitingOn: aiAnalysis.waitingOn || waitingOn.slice(0, 2)
-          };
-        }
-      } catch (error) {
-        console.log('🤖 AI analysis skipped:', error.message);
-      }
+    // If no personalized data, show what needs to be done
+    if (replySuggestions.length === 0 && emails.length > 0) {
+      replySuggestions.push('📧 Check your recent emails for important messages');
+    }
+    
+    if (quickWins.length === 0 && tasks.length > 0) {
+      // Show any tasks assigned to you
+      const yourTasks = tasks.slice(0, 3);
+      yourTasks.forEach(task => {
+        quickWins.push(`📋 ${task.title || task.name}`);
+      });
+    }
+    
+    if (upcomingTasks.length === 0 && tasks.length > 0) {
+      // Show your most recent tasks
+      tasks.slice(0, 3).forEach(task => {
+        upcomingTasks.push(`📋 ${task.title || task.name} (${task.status})`);
+      });
     }
 
-    // Return analyzed data
+    // Return personalized analysis
     return {
       replySuggestions: replySuggestions.slice(0, 3),
       quickWins: quickWins.slice(0, 3),
@@ -198,19 +262,20 @@ class MagicInboxProcessor {
   }
 
   async getAIAnalysis(context) {
-    const prompt = `Analyze this work context and provide actionable insights:
+    const prompt = `Analyze this work context for ${this.currentUser} and provide personalized actionable insights:
 
 Unread Emails: ${JSON.stringify(context.unreadEmails, null, 2)}
-Urgent Tasks: ${JSON.stringify(context.urgentTasks, null, 2)}
+My Urgent Tasks: ${JSON.stringify(context.myUrgentTasks, null, 2)}
+My Upcoming Tasks: ${JSON.stringify(context.myUpcomingTasks, null, 2)}
+My Overdue Tasks: ${JSON.stringify(context.myOverdueTasks, null, 2)}
 Upcoming Meetings: ${JSON.stringify(context.upcomingMeetings, null, 2)}
-Overdue Tasks: ${JSON.stringify(context.overdueTasks, null, 2)}
 
-Provide a JSON response with these exact fields:
+Provide a JSON response with personalized recommendations for ${this.currentUser}:
 {
-  "replySuggestions": ["3 most important emails to reply to with sender and topic"],
-  "quickWins": ["3 tasks that can be completed in under 5 minutes"],
-  "upcomingTasks": ["3 most urgent upcoming deadlines"],
-  "waitingOn": ["2 items you're waiting on from others"]
+  "replySuggestions": ["3 most important emails ${this.currentUser} should reply to"],
+  "quickWins": ["3 tasks ${this.currentUser} can complete quickly today"],
+  "upcomingTasks": ["3 most urgent deadlines for ${this.currentUser}"],
+  "waitingOn": ["2 items ${this.currentUser} is waiting on or overdue"]
 }`;
 
     try {
@@ -218,7 +283,7 @@ Provide a JSON response with these exact fields:
         const completion = await this.openai.chat.completions.create({
           model: 'gpt-3.5-turbo',
           messages: [
-            { role: 'system', content: 'You are a productivity assistant. Analyze work data and provide actionable insights in JSON format.' },
+            { role: 'system', content: `You are a personal productivity assistant for ${this.currentUser}. Analyze their work data and provide personalized actionable insights in JSON format.` },
             { role: 'user', content: prompt }
           ],
           temperature: 0.7,
@@ -246,26 +311,27 @@ Provide a JSON response with these exact fields:
       success: true,
       data: {
         replySuggestions: [
-          "Configure Gmail integration to see important emails",
-          "Connect Slack to monitor team messages",
-          "Set up Calendar for meeting reminders"
+          `📧 No emails requiring ${this.currentUser}'s immediate attention`,
+          "💡 Connect Gmail to see important messages",
+          "🔔 Enable notifications for priority emails"
         ],
         quickWins: [
-          "Test Notion integration with sample tasks",
-          "Configure AI settings in .env file",
-          "Review integration status in dashboard"
+          `✅ No quick tasks assigned to ${this.currentUser}`,
+          "📝 Create your first task in Notion",
+          "🎯 Set up your daily priorities"
         ],
         upcomingTasks: [
-          "Complete integration setup for full functionality",
-          "Add team members to Notion workspace",
-          "Schedule weekly review meetings"
+          `📅 No upcoming deadlines for ${this.currentUser}`,
+          "📋 Add tasks with due dates to track deadlines",
+          "⏰ Schedule your weekly review"
         ],
         waitingOn: [
-          "API keys for remaining integrations",
-          "OAuth setup for Google services"
+          "⏸️ No blocked items",
+          "🔄 Check for pending approvals"
         ]
       },
       metadata: {
+        user: this.currentUser,
         totalEmails: 0,
         totalTasks: 0,
         totalMeetings: 0,
