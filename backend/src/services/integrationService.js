@@ -1,4 +1,4 @@
-// backend/src/services/integrationService.js - Core Gmail Methods
+// backend/src/services/integrationService.js - Core Gmail Methods with SUPA integration
 const { google } = require('googleapis');
 const fetch = require('node-fetch');
 const CalendarService = require('./calendarService');
@@ -23,30 +23,32 @@ class IntegrationService {
     }
 
     // Initialize services
-    this.gmailService = new GmailService();
+    this.supabaseService = new SupabaseService(); // Initialize Supabase first
+    this.gmailService = new GmailService(this.supabaseService); // Pass Supabase to Gmail
     this.calendarService = new CalendarService();
     this.notionService = new NotionService();
-    this.supabaseService = new SupabaseService();
     this.openaiService = new OpenAIService();
     this.claudeService = new ClaudeService();
     
-    // Initialize Gmail service
+    // Initialize Gmail service with SUPA connection
     this.gmailService.initialize();
     
-    console.log('🔧 IntegrationService initialized');
+    console.log('🔧 IntegrationService initialized with SUPA-Gmail connection');
   }
 
   // ===== GMAIL METHODS =====
-  async getLatestEmails(limit = 10) {
+  async getLatestEmails(limit = 100) { // ENHANCED: Default to 100 emails
     try {
-      // Use the Gmail service
+      // Use the enhanced Gmail service
       const result = await this.gmailService.getRecentEmails(limit);
       
       if (result.success) {
+        console.log(`📧 Fetched ${result.emails.length} emails (${result.stats?.fromKnownContacts || 0} from known contacts)`);
         return {
           success: true,
           emails: result.emails,
-          count: result.emails.length
+          count: result.emails.length,
+          stats: result.stats
         };
       }
       
@@ -60,16 +62,36 @@ class IntegrationService {
             subject: 'Your meeting recap - mtm-jsvm-pqk',
             from: 'Fred from Fireflies',
             snippet: 'Alec CHAPADOS invited Fireflies to your meeting to record and take notes...',
-            date: new Date().toISOString()
+            date: new Date().toISOString(),
+            contact: {
+              found: true,
+              type: 'client',
+              name: 'Fred from Fireflies',
+              company: 'Fireflies',
+              relationship: 'medium'
+            },
+            priority: 7
           },
           {
             id: 'mock-2',
             subject: 'Re: Animation / PACT!',
             from: 'Leeza Venneri',
             snippet: 'Hi Andy, I hope you\'re having a great Saturday!',
-            date: new Date().toISOString()
+            date: new Date().toISOString(),
+            contact: {
+              found: false,
+              type: 'unknown',
+              email: 'leeza@example.com'
+            },
+            priority: 5
           }
-        ]
+        ],
+        stats: {
+          total: 2,
+          fromKnownContacts: 1,
+          unread: 0,
+          highPriority: 0
+        }
       };
       
     } catch (error) {
@@ -83,9 +105,64 @@ class IntegrationService {
             subject: 'Your meeting recap',
             from: 'Fireflies',
             snippet: 'Meeting summary...',
-            date: new Date().toISOString()
+            date: new Date().toISOString(),
+            contact: { found: false, type: 'unknown' },
+            priority: 5
           }
-        ]
+        ],
+        stats: { total: 1, fromKnownContacts: 0, unread: 0, highPriority: 0 }
+      };
+    }
+  }
+
+  // ENHANCED: Get email statistics
+  async getEmailStats() {
+    try {
+      const result = await this.gmailService.getEmailStats();
+      return result;
+    } catch (error) {
+      console.error('Failed to get email stats:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
+  // ENHANCED: Search emails by contact
+  async searchEmailsByContact(contactId) {
+    try {
+      // Get contact from SUPA
+      const contact = await this.supabaseService.getContactById(contactId);
+      if (!contact) {
+        return { success: false, error: 'Contact not found' };
+      }
+      
+      // Search Gmail for emails from/to this contact
+      const result = await this.gmailService.searchEmails('', { contactId });
+      return result;
+    } catch (error) {
+      console.error('Failed to search emails by contact:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
+  // ENHANCED: Refresh client mappings when SUPA data changes
+  async refreshEmailContactMappings() {
+    try {
+      await this.gmailService.refreshClientMappings();
+      return {
+        success: true,
+        message: 'Email-contact mappings refreshed'
+      };
+    } catch (error) {
+      console.error('Failed to refresh mappings:', error);
+      return {
+        success: false,
+        error: error.message
       };
     }
   }
