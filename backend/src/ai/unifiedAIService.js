@@ -1,5 +1,5 @@
 // backend/src/ai/unifiedAIService.js
-// Unified AI service that handles both OpenAI and Claude with different modes and action execution
+// Unified AI service with ENHANCED CONTEXT MEMORY for conversation continuity
 
 const OpenAI = require('openai');
 const Anthropic = require('@anthropic-ai/sdk');
@@ -29,6 +29,13 @@ class UnifiedAIService {
       });
       console.log('✅ Claude initialized');
     }
+    
+    // ENHANCED: Conversation memory with larger context window
+    this.conversationHistory = [];
+    this.maxHistoryLength = 20; // Keep last 20 messages for context
+    this.shortTermMemory = {}; // Store important context from recent messages
+    this.pendingTasks = []; // Track tasks mentioned but not yet created
+    this.lastActionContext = null; // Remember last action for follow-ups
     
     // Define AI modes with specific system prompts - now with action capabilities
     this.modes = {
@@ -67,6 +74,8 @@ Be bold, creative, and push boundaries while remaining practical.`,
 - Set priorities and due dates
 - Push action items from meetings to Notion
 
+IMPORTANT: Remember context from previous messages. If user says "yes" or "set it for tomorrow" after mentioning a task, CREATE THE TASK with the remembered details.
+
 When asked to manage tasks, confirm the action you're taking.
 Available commands: create_task, update_task, complete_task, assign_task, push_to_notion`,
         model: 'gpt-4',
@@ -96,6 +105,8 @@ Available commands: analyze_emails, analyze_tasks, generate_report`,
 - Send Slack messages
 - Remember information about clients and team
 
+CRITICAL: You MUST remember context from previous messages in the conversation. When user says "yes", "set it", or confirms something, check what they're referring to from earlier messages and EXECUTE the action.
+
 When asked to perform an action, confirm what you're doing and execute it.
 Available commands: ALL (email, task, calendar, slack, analysis, memory operations)`,
         model: 'gpt-4',
@@ -115,21 +126,224 @@ Available commands: ALL (email, task, calendar, slack, analysis, memory operatio
     return false;
   }
 
+  // ENHANCED: Extract and store important context from messages
+  extractAndStoreContext(message) {
+    const lowerMessage = message.toLowerCase();
+    
+    // Extract task-related information
+    if (lowerMessage.includes('task') || lowerMessage.includes('todo')) {
+      // Store the full context about the task
+      this.pendingTasks.push({
+        raw: message,
+        timestamp: new Date(),
+        mentioned: true
+      });
+    }
+    
+    // Extract names and assignees
+    const namePatterns = [
+      /for\s+(\w+)/i,
+      /assign(?:ed)?\s+to\s+(\w+)/i,
+      /(\w+)'s\s+task/i,
+      /alec|leo|steph|pablo|alexa|anthony|dany|mathieu/gi
+    ];
+    
+    for (const pattern of namePatterns) {
+      const match = message.match(pattern);
+      if (match) {
+        const name = match[1] || match[0];
+        this.shortTermMemory.lastMentionedPerson = name.charAt(0).toUpperCase() + name.slice(1).toLowerCase();
+        this.shortTermMemory.lastMentionedPersonTime = new Date();
+      }
+    }
+    
+    // Extract dates
+    const datePatterns = [
+      /tomorrow/i,
+      /today/i,
+      /next\s+\w+/i,
+      /due\s+(?:on|by|for)?\s*([^,.\s]+)/i
+    ];
+    
+    for (const pattern of datePatterns) {
+      const match = message.match(pattern);
+      if (match) {
+        this.shortTermMemory.lastMentionedDate = match[0];
+        this.shortTermMemory.lastMentionedDateTime = new Date();
+      }
+    }
+    
+    // Extract task details if message contains them
+    if (lowerMessage.includes('-') || lowerMessage.includes(':')) {
+      const parts = message.split(/[-:]/);
+      if (parts.length > 1) {
+        this.shortTermMemory.lastTaskDescription = parts[1].trim();
+      }
+    }
+    
+    // Remember if user is confirming something
+    if (lowerMessage === 'yes' || 
+        lowerMessage === 'yes please' ||
+        lowerMessage === 'correct' || 
+        lowerMessage === 'right' ||
+        lowerMessage.includes('yes set it') ||
+        lowerMessage.includes('do it')) {
+      this.shortTermMemory.userConfirmed = true;
+      this.shortTermMemory.confirmationTime = new Date();
+    }
+  }
+
+  // ENHANCED: Check if this is a follow-up message
+  isFollowUpMessage(message) {
+    const lowerMessage = message.toLowerCase();
+    
+    // Direct confirmations
+    if (lowerMessage === 'yes' || 
+        lowerMessage === 'yes please' ||
+        lowerMessage === 'correct' ||
+        lowerMessage === 'right' ||
+        lowerMessage === 'do it' ||
+        lowerMessage === 'go ahead') {
+      return true;
+    }
+    
+    // Contextual confirmations
+    if (lowerMessage.includes('yes set it') ||
+        lowerMessage.includes('set it for') ||
+        lowerMessage.includes('make it') ||
+        lowerMessage.includes('add it') ||
+        lowerMessage.includes('that task')) {
+      return true;
+    }
+    
+    return false;
+  }
+
+  // ENHANCED: Build intent from conversation context
+  buildIntentFromContext(message) {
+    // Check if we have pending task information
+    if (this.pendingTasks.length > 0 || this.shortTermMemory.lastTaskDescription) {
+      const params = {
+        description: message
+      };
+      
+      // Use the last mentioned task description
+      if (this.shortTermMemory.lastTaskDescription) {
+        params.title = this.shortTermMemory.lastTaskDescription;
+      } else if (this.pendingTasks.length > 0) {
+        const lastTask = this.pendingTasks[this.pendingTasks.length - 1];
+        // Extract title from the task mention
+        const taskMatch = lastTask.raw.match(/(?:task|todo)[^.!?-:]*([-:]\s*)?(.+)/i);
+        if (taskMatch && taskMatch[2]) {
+          params.title = taskMatch[2].trim();
+        }
+      }
+      
+      // Use remembered person
+      if (this.shortTermMemory.lastMentionedPerson) {
+        params.assignee = this.shortTermMemory.lastMentionedPerson;
+      }
+      
+      // Parse date from current message or use remembered date
+      if (message.toLowerCase().includes('tomorrow')) {
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        params.dueDate = tomorrow.toISOString().split('T')[0];
+      } else if (this.shortTermMemory.lastMentionedDate) {
+        params.dueDate = this.parseDateFromContext(this.shortTermMemory.lastMentionedDate);
+      }
+      
+      return {
+        action: 'create_task',
+        params: params
+      };
+    }
+    
+    return null;
+  }
+
+  // Parse date from context
+  parseDateFromContext(dateString) {
+    const today = new Date();
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    
+    if (dateString.toLowerCase().includes('tomorrow')) {
+      return tomorrow.toISOString().split('T')[0];
+    } else if (dateString.toLowerCase().includes('today')) {
+      return today.toISOString().split('T')[0];
+    }
+    
+    // Try to use action executor's date parser
+    return this.actionExecutor.parseDueDate ? 
+      this.actionExecutor.parseDueDate(dateString) : 
+      null;
+  }
+
   async processMessage(message, options = {}) {
     const mode = options.mode || this.currentMode;
     const modeConfig = this.modes[mode];
+    
+    // ENHANCED: Store message in conversation history
+    this.conversationHistory.push({
+      role: 'user',
+      content: message,
+      timestamp: new Date()
+    });
+    
+    // Keep conversation history manageable
+    if (this.conversationHistory.length > this.maxHistoryLength) {
+      this.conversationHistory = this.conversationHistory.slice(-this.maxHistoryLength);
+    }
+    
+    // ENHANCED: Extract and store context from message
+    this.extractAndStoreContext(message);
     
     // Gather context based on the message
     const fullContext = await this.context.gatherFullContext(message, {
       includeSlack: options.includeSlack || false
     });
     
+    // ENHANCED: Add conversation history to context
+    fullContext.conversationHistory = this.conversationHistory;
+    fullContext.shortTermMemory = this.shortTermMemory;
+    fullContext.pendingTasks = this.pendingTasks;
+    
     // Build the context prompt
     const contextPrompt = this.buildContextPrompt(fullContext);
     
-    // Add action capabilities to system prompt
+    // ENHANCED: Check if this is a follow-up and we should execute an action
+    let actionResult = null;
+    if (modeConfig.canExecuteActions && this.isFollowUpMessage(message)) {
+      const contextIntent = this.buildIntentFromContext(message);
+      if (contextIntent) {
+        console.log('🎯 Executing action from context:', contextIntent);
+        actionResult = await this.actionExecutor.executeAction(contextIntent.action, contextIntent.params);
+        
+        // Store successful action
+        if (actionResult && actionResult.success) {
+          this.lastActionContext = {
+            action: contextIntent.action,
+            params: contextIntent.params,
+            result: actionResult,
+            timestamp: new Date()
+          };
+          
+          // Clear pending tasks after successful execution
+          this.pendingTasks = [];
+          this.shortTermMemory.lastTaskDescription = null;
+        }
+      }
+    }
+    
+    // Add action capabilities and conversation context to system prompt
     const actionPrompt = modeConfig.canExecuteActions ? 
-      `\n\nIMPORTANT: You have the ability to EXECUTE ACTIONS directly. When the user asks you to do something, actually do it using the available commands, don't just describe what they should do.` : '';
+      `\n\nIMPORTANT: You have the ability to EXECUTE ACTIONS directly. When the user asks you to do something, actually do it using the available commands, don't just describe what they should do.
+      
+CRITICAL: Remember the conversation context. The user just said: "${message}"
+Previous messages: ${this.conversationHistory.slice(-3).map(m => `${m.role}: ${m.content}`).join('\n')}
+${this.shortTermMemory.lastMentionedPerson ? `Last mentioned person: ${this.shortTermMemory.lastMentionedPerson}` : ''}
+${this.shortTermMemory.lastTaskDescription ? `Last task mentioned: ${this.shortTermMemory.lastTaskDescription}` : ''}` : '';
     
     // Combine system prompt with context
     const systemPrompt = `${modeConfig.systemPrompt}${actionPrompt}\n\nCurrent Context:\n${contextPrompt}`;
@@ -160,20 +374,35 @@ Available commands: ALL (email, task, calendar, slack, analysis, memory operatio
     
     // Fallback response if both fail
     if (!response) {
-      response = this.generateFallbackResponse(message, mode);
+      response = this.generateFallbackResponse(message, mode, actionResult);
       usedModel = 'Fallback';
     }
     
-    // Check if we should execute an action
-    let actionResult = null;
-    if (modeConfig.canExecuteActions && !options.skipActions) {
+    // Check if we should execute an action (if not already done)
+    if (!actionResult && modeConfig.canExecuteActions && !options.skipActions) {
       actionResult = await this.actionExecutor.parseAndExecute(message, response);
       
-      // If action was successful, enhance the response
+      // Store successful action
       if (actionResult && actionResult.success) {
-        response = this.enhanceResponseWithAction(response, actionResult);
+        this.lastActionContext = {
+          action: actionResult.action,
+          result: actionResult,
+          timestamp: new Date()
+        };
       }
     }
+    
+    // Enhance response with action result
+    if (actionResult && actionResult.success) {
+      response = this.enhanceResponseWithAction(response, actionResult);
+    }
+    
+    // ENHANCED: Store AI response in conversation history
+    this.conversationHistory.push({
+      role: 'assistant',
+      content: response,
+      timestamp: new Date()
+    });
     
     // Log the interaction for learning
     const entities = this.memory.extractEntities(message);
@@ -183,13 +412,20 @@ Available commands: ALL (email, task, calendar, slack, analysis, memory operatio
       await this.memory.logInteraction('team', entities.team[0].name, mode, message, response);
     }
     
+    // Clean up old pending tasks (older than 5 minutes)
+    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+    this.pendingTasks = this.pendingTasks.filter(task => 
+      task.timestamp > fiveMinutesAgo
+    );
+    
     return {
       response,
       mode: modeConfig.name,
       model: usedModel,
       context: fullContext,
       actionResult: actionResult,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      conversationLength: this.conversationHistory.length
     };
   }
 
@@ -235,6 +471,29 @@ Available commands: ALL (email, task, calendar, slack, analysis, memory operatio
 
   buildContextPrompt(context) {
     let prompt = [];
+    
+    // ENHANCED: Add conversation history
+    if (context.conversationHistory && context.conversationHistory.length > 1) {
+      prompt.push('Recent Conversation:');
+      const recentMessages = context.conversationHistory.slice(-5);
+      recentMessages.forEach(msg => {
+        if (msg.role !== 'system') {
+          prompt.push(`${msg.role}: ${msg.content}`);
+        }
+      });
+      prompt.push('');
+    }
+    
+    // Add short-term memory
+    if (context.shortTermMemory && Object.keys(context.shortTermMemory).length > 0) {
+      prompt.push('Remembered Context:');
+      for (const [key, value] of Object.entries(context.shortTermMemory)) {
+        if (!(value instanceof Date) && key !== 'confirmationTime' && key !== 'lastMentionedDateTime') {
+          prompt.push(`- ${key}: ${value}`);
+        }
+      }
+      prompt.push('');
+    }
     
     // Add memory context
     if (context.memories) {
@@ -286,7 +545,25 @@ Available commands: ALL (email, task, calendar, slack, analysis, memory operatio
     return prompt.join('\n');
   }
 
-  generateFallbackResponse(message, mode) {
+  // ENHANCED: Generate fallback response with context awareness
+  generateFallbackResponse(message, mode, actionResult) {
+    // If action was executed, confirm it
+    if (actionResult && actionResult.success) {
+      return `I'll add that task for ${actionResult.task?.assignee || 'the team'}. 
+
+**Task Added:**
+- **Title:** ${actionResult.task?.title || 'New Task'}
+- **Assigned To:** ${actionResult.task?.assignee || 'Team'}
+- **Due Date:** ${actionResult.task?.dueDate || 'Not set'}
+
+Is there anything else you'd like to add to this task or another task you need help with?`;
+    }
+    
+    // Check if this is a follow-up
+    if (this.isFollowUpMessage(message) && this.pendingTasks.length > 0) {
+      return "I understand you want to confirm the previous task. Let me process that for you.";
+    }
+    
     const responses = {
       emailResponder: "I'll help you draft a response. Based on the context, I suggest acknowledging the message and providing a clear next step.",
       creativeIdeas: "Here's a creative approach: Consider exploring unconventional solutions that combine existing resources in new ways.",
@@ -420,7 +697,10 @@ Provide:
       currentMode: this.currentMode,
       availableModes: this.getAvailableModes(),
       actionExecutor: true,
-      totalActions: Object.keys(this.actionExecutor.actions).length
+      totalActions: Object.keys(this.actionExecutor.actions).length,
+      conversationHistory: this.conversationHistory.length,
+      shortTermMemory: Object.keys(this.shortTermMemory).length,
+      pendingTasks: this.pendingTasks.length
     };
   }
 }
