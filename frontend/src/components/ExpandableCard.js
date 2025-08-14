@@ -11,7 +11,8 @@ const ExpandableCard = ({
   isLoading,
   className = "",
   expandedContent,
-  defaultExpanded = false
+  defaultExpanded = false,
+  collapsedHeight = "max-h-96" // New prop for customizable collapsed height
 }) => {
   const [isExpanded, setIsExpanded] = useState(defaultExpanded);
   const [cardPosition, setCardPosition] = useState(null);
@@ -95,7 +96,7 @@ const ExpandableCard = ({
         <div className={`transition-all duration-500 ease-in-out ${
           isExpanded 
             ? 'max-h-[calc(85vh-80px)] overflow-y-auto pr-2 custom-scrollbar' 
-            : 'max-h-96 overflow-y-auto'
+            : `${collapsedHeight} overflow-y-auto`
         }`}>
           {isExpanded && expandedContent ? expandedContent : children}
         </div>
