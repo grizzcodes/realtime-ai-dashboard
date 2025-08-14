@@ -16,6 +16,25 @@
   }
 }
 
+/* Checkbox Animation */
+@keyframes scale-in {
+  0% {
+    transform: scale(0);
+    opacity: 0;
+  }
+  50% {
+    transform: scale(1.2);
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.animate-scale-in {
+  animation: scale-in 0.3s ease-out;
+}
+
 /* Custom Scrollbar for Expanded Cards */
 .custom-scrollbar::-webkit-scrollbar {
   width: 10px;
