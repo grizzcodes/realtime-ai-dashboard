@@ -1055,7 +1055,7 @@ const App = () => {
               </ExpandableCard>
             </div>
 
-            {/* Right Column - Emails with ExpandableCard */}
+            {/* Right Column - Emails with ExpandableCard - INCREASED HEIGHT TO MATCH NOTION */}
             <ExpandableCard
               title="Gmail"
               icon="📧"
@@ -1063,6 +1063,7 @@ const App = () => {
               onRefresh={loadEmails}
               isLoading={isLoadingEmails}
               className="expandable-hover"
+              collapsedHeight="max-h-[600px]"  // INCREASED HEIGHT TO MATCH NOTION TASKS
               expandedContent={
                 <div className="space-y-3 expanded-content">
                   {emails.map(email => (
