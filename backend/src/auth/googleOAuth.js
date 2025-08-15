@@ -3,14 +3,23 @@ class GoogleOAuth {
   constructor() {
     this.clientId = process.env.GOOGLE_CLIENT_ID;
     this.clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-    this.redirectUri = 'http://localhost:3002/auth/google/callback';
+    this.redirectUri = 'http://localhost:3001/auth/google/callback';
   }
 
   getAuthUrl() {
     const scopes = [
+      // Existing scopes
       'https://www.googleapis.com/auth/gmail.readonly',
       'https://www.googleapis.com/auth/calendar',
-      'https://www.googleapis.com/auth/userinfo.email'
+      'https://www.googleapis.com/auth/userinfo.email',
+      
+      // NEW: Google Drive scopes for full access
+      'https://www.googleapis.com/auth/drive', // Full Drive access
+      'https://www.googleapis.com/auth/drive.file', // Files created/opened by app
+      'https://www.googleapis.com/auth/drive.readonly', // Read-only access to all files
+      'https://www.googleapis.com/auth/drive.metadata.readonly', // Read-only metadata
+      'https://www.googleapis.com/auth/drive.appdata', // App configuration data
+      'https://www.googleapis.com/auth/drive.photos.readonly' // Photos access
     ];
 
     const params = new URLSearchParams({
