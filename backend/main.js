@@ -65,6 +65,52 @@ if (fs.existsSync(path.join(__dirname, 'src/routes/authRoutes.js'))) {
   console.log('🔐 Google OAuth routes loaded - visit /auth/google to authenticate');
 }
 
+// Load Google Drive routes
+if (fs.existsSync(path.join(__dirname, 'src/routes/driveRoutes.js'))) {
+  const driveRoutes = require('./src/routes/driveRoutes');
+  app.use('/api/drive', driveRoutes);
+  console.log('📁 Google Drive routes loaded');
+} else if (fs.existsSync(path.join(__dirname, 'src/services/googleDriveService.js'))) {
+  // If service exists but routes don't, create basic routes inline
+  const GoogleDriveService = require('./src/services/googleDriveService');
+  const driveService = new GoogleDriveService();
+  
+  // Basic Drive routes
+  app.get('/api/drive/status', async (req, res) => {
+    const result = await driveService.testConnection();
+    res.json(result);
+  });
+  
+  app.get('/api/drive/folders', async (req, res) => {
+    const result = await driveService.listAllFolders();
+    res.json(result);
+  });
+  
+  app.get('/api/drive/folder/:folderId', async (req, res) => {
+    const { folderId } = req.params;
+    const { shared } = req.query;
+    const result = await driveService.getFolderContents(folderId, shared === 'true');
+    res.json(result);
+  });
+  
+  app.get('/api/drive/search', async (req, res) => {
+    const { q, mimeType, limit } = req.query;
+    const result = await driveService.searchFiles(q, { mimeType, limit: limit ? parseInt(limit) : 50 });
+    res.json(result);
+  });
+  
+  app.post('/api/drive/sync', async (req, res) => {
+    const { folderId, brandName, isSharedDrive } = req.body;
+    if (!folderId || !brandName) {
+      return res.status(400).json({ success: false, error: 'folderId and brandName are required' });
+    }
+    const result = await driveService.syncFolderToDatabase({ id: folderId, name: brandName, source: isSharedDrive ? 'shared' : 'mydrive' });
+    res.json(result);
+  });
+  
+  console.log('📁 Google Drive routes loaded (inline)');
+}
+
 // Check if Slack-Fireflies routes exist before requiring
 if (fs.existsSync(path.join(__dirname, 'src/routes/slackFirefliesRoutes.js'))) {
   require('./src/routes/slackFirefliesRoutes')(app); // Slack-Fireflies integration
@@ -103,7 +149,7 @@ server.listen(PORT, () => {
   // Show OAuth setup reminder if not configured
   if (!process.env.GOOGLE_REFRESH_TOKEN) {
     console.log('');
-    console.log('⚠️  Gmail Archive Not Working? Set up OAuth:');
+    console.log('⚠️  Gmail/Drive Not Working? Set up OAuth:');
     console.log(`   Visit: http://localhost:${PORT}/auth/google`);
     console.log('');
   }
