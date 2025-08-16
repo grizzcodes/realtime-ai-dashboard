@@ -1,5 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Image, Video, Sparkles, Save, Eye, Upload, ChevronDown, Loader, Check, X } from 'lucide-react';
+import { 
+  Image, Video, Sparkles, Save, Eye, Upload, ChevronDown, 
+  Loader, Check, X, FolderOpen, HardDrive, Users, Search,
+  RefreshCw, Link, FileText, FolderPlus
+} from 'lucide-react';
 
 const ProductionTab = () => {
   // State for CGI Image Proposals
@@ -24,32 +28,192 @@ const ProductionTab = () => {
   const [generatedVideo, setGeneratedVideo] = useState(null);
   const [isGeneratingVideo, setIsGeneratingVideo] = useState(false);
   
-  // Brand folders (will be populated from Supabase)
-  const [brandFolders, setBrandFolders] = useState([
-    { id: '1', name: 'Nike - Just Do It', context: 'Athletic, empowering, bold' },
-    { id: '2', name: 'Apple - Think Different', context: 'Minimalist, innovative, premium' },
-    { id: '3', name: 'Coca-Cola - Taste the Feeling', context: 'Refreshing, joyful, classic' },
-    { id: '4', name: 'Tesla - Future Forward', context: 'Futuristic, sustainable, innovative' }
-  ]);
+  // Google Drive Integration States
+  const [driveConnected, setDriveConnected] = useState(false);
+  const [driveFolders, setDriveFolders] = useState([]);
+  const [sharedDrives, setSharedDrives] = useState([]);
+  const [selectedDriveFolder, setSelectedDriveFolder] = useState(null);
+  const [folderContents, setFolderContents] = useState([]);
+  const [loadingDrive, setLoadingDrive] = useState(false);
+  const [driveView, setDriveView] = useState('folders'); // 'folders' or 'contents'
+  const [searchQuery, setSearchQuery] = useState('');
+  const [syncingFolder, setSyncingFolder] = useState(false);
   
-  // Load brand folders from Supabase
+  // Brand folders (combination of local and Drive)
+  const [brandFolders, setBrandFolders] = useState([]);
+  const [brandSource, setBrandSource] = useState('local'); // 'local' or 'drive'
+  
+  // Load initial data
   useEffect(() => {
+    checkDriveConnection();
     loadBrandFolders();
   }, []);
   
+  // Check Google Drive connection status
+  const checkDriveConnection = async () => {
+    try {
+      const response = await fetch('http://localhost:3001/api/drive/status');
+      const data = await response.json();
+      setDriveConnected(data.success);
+      
+      if (data.success) {
+        loadDriveFolders();
+      }
+    } catch (error) {
+      console.error('Failed to check Drive connection:', error);
+      setDriveConnected(false);
+    }
+  };
+  
+  // Load folders from Google Drive
+  const loadDriveFolders = async () => {
+    setLoadingDrive(true);
+    try {
+      const response = await fetch('http://localhost:3001/api/drive/folders');
+      const data = await response.json();
+      
+      if (data.success) {
+        setDriveFolders(data.myDrive.folders);
+        setSharedDrives(data.sharedDrives);
+        
+        // Transform Drive folders to brand format
+        const driveBrands = data.myDrive.folders.map(folder => ({
+          id: folder.id,
+          name: folder.name,
+          context: 'Synced from Google Drive',
+          source: 'drive',
+          driveId: folder.id,
+          webViewLink: folder.webViewLink
+        }));
+        
+        // Add shared drive folders
+        data.sharedDrives.forEach(drive => {
+          drive.folders.forEach(folder => {
+            driveBrands.push({
+              id: folder.id,
+              name: `${drive.driveName} / ${folder.name}`,
+              context: `Shared Drive: ${drive.driveName}`,
+              source: 'drive',
+              driveId: folder.id,
+              sharedDriveId: drive.driveId,
+              webViewLink: folder.webViewLink
+            });
+          });
+        });
+        
+        setBrandFolders(prev => [...prev.filter(b => b.source !== 'drive'), ...driveBrands]);
+      }
+    } catch (error) {
+      console.error('Failed to load Drive folders:', error);
+    } finally {
+      setLoadingDrive(false);
+    }
+  };
+  
+  // Load folder contents from Drive
+  const loadFolderContents = async (folderId, isSharedDrive = false) => {
+    setLoadingDrive(true);
+    try {
+      const response = await fetch(`http://localhost:3001/api/drive/folder/${folderId}?shared=${isSharedDrive}`);
+      const data = await response.json();
+      
+      if (data.success) {
+        setFolderContents(data.files);
+        setDriveView('contents');
+      }
+    } catch (error) {
+      console.error('Failed to load folder contents:', error);
+    } finally {
+      setLoadingDrive(false);
+    }
+  };
+  
+  // Sync Drive folder to database for AI access
+  const syncFolderToDatabase = async (folder) => {
+    setSyncingFolder(true);
+    try {
+      const response = await fetch('http://localhost:3001/api/drive/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          folderId: folder.driveId,
+          brandName: folder.name,
+          isSharedDrive: !!folder.sharedDriveId
+        })
+      });
+      
+      const data = await response.json();
+      if (data.success) {
+        alert(`✅ Synced ${data.filesProcessed} files from ${folder.name} for AI training!`);
+        
+        // Update folder to show it's synced
+        setBrandFolders(prev => prev.map(f => 
+          f.id === folder.id ? { ...f, synced: true, context: `AI-Ready: ${data.filesProcessed} files` } : f
+        ));
+      }
+    } catch (error) {
+      console.error('Failed to sync folder:', error);
+      alert('Failed to sync folder. Please try again.');
+    } finally {
+      setSyncingFolder(false);
+    }
+  };
+  
+  // Search Drive files
+  const searchDriveFiles = async () => {
+    if (!searchQuery) return;
+    
+    setLoadingDrive(true);
+    try {
+      const response = await fetch(`http://localhost:3001/api/drive/search?q=${encodeURIComponent(searchQuery)}`);
+      const data = await response.json();
+      
+      if (data.success) {
+        setFolderContents(data.files);
+        setDriveView('contents');
+      }
+    } catch (error) {
+      console.error('Search failed:', error);
+    } finally {
+      setLoadingDrive(false);
+    }
+  };
+  
+  // Import Drive file as asset
+  const importDriveAsset = async (file) => {
+    try {
+      // For images, we can use the thumbnailLink or webContentLink
+      if (file.mimeType.startsWith('image/')) {
+        setSelectedAssets([...selectedAssets, {
+          id: file.id,
+          name: file.name,
+          url: file.webContentLink || file.thumbnailLink,
+          source: 'drive'
+        }]);
+        alert(`✅ Added ${file.name} to assets`);
+      } else {
+        alert('Only image files can be imported as assets currently');
+      }
+    } catch (error) {
+      console.error('Failed to import asset:', error);
+    }
+  };
+  
+  // Load brand folders from local database
   const loadBrandFolders = async () => {
     try {
       const response = await fetch('http://localhost:3001/api/production/brands');
       const data = await response.json();
       if (data.success && data.brands) {
-        setBrandFolders(data.brands);
+        const localBrands = data.brands.map(b => ({ ...b, source: 'local' }));
+        setBrandFolders(localBrands);
       }
     } catch (error) {
       console.error('Failed to load brand folders:', error);
     }
   };
   
-  // Generate CGI Images
+  // Generate CGI Images with Drive context
   const generateImages = async () => {
     if (!selectedBrand || !imagePrompt) {
       alert('Please select a brand and enter a prompt');
@@ -59,7 +223,14 @@ const ProductionTab = () => {
     setIsGeneratingImages(true);
     try {
       const brand = brandFolders.find(b => b.id === selectedBrand);
-      const enhancedPrompt = `${brand.context}. ${imagePrompt}`;
+      
+      // If it's a Drive folder and synced, include that context
+      let enhancedPrompt = imagePrompt;
+      if (brand.source === 'drive' && brand.synced) {
+        enhancedPrompt = `Based on brand folder "${brand.name}" context: ${imagePrompt}`;
+      } else {
+        enhancedPrompt = `${brand.context}. ${imagePrompt}`;
+      }
       
       const response = await fetch('http://localhost:3001/api/production/generate-images', {
         method: 'POST',
@@ -68,7 +239,8 @@ const ProductionTab = () => {
           model: imageModel,
           prompt: enhancedPrompt,
           brand: brand.name,
-          variations: 3
+          variations: 3,
+          driveContext: brand.source === 'drive' ? brand.driveId : null
         })
       });
       
@@ -102,7 +274,6 @@ const ProductionTab = () => {
       const data = await response.json();
       if (data.success) {
         alert('Image saved to project!');
-        // Add to selected assets for video generation
         setSelectedAssets([...selectedAssets, imageUrl]);
       }
     } catch (error) {
@@ -216,21 +387,214 @@ const ProductionTab = () => {
   // Handle file upload for video assets
   const handleAssetUpload = (event) => {
     const files = Array.from(event.target.files);
-    // Here you would upload to Supabase and get URLs
-    // For now, we'll create object URLs as placeholders
     const newAssets = files.map(file => URL.createObjectURL(file));
     setSelectedAssets([...selectedAssets, ...newAssets]);
   };
 
   return (
     <div className="production-container">
+      {/* Google Drive Connection Banner */}
+      {!driveConnected && (
+        <div className="mb-6 p-4 glass rounded-lg border border-yellow-500 border-opacity-50">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <HardDrive className="text-yellow-400" size={24} />
+              <div>
+                <h3 className="font-bold">Connect Google Drive for Enhanced Features</h3>
+                <p className="text-sm opacity-70">Access brand folders from MyDrive and Shared Drives for AI context</p>
+              </div>
+            </div>
+            <a 
+              href="http://localhost:3001/auth/google" 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="btn-glass px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-blue-500 hover:bg-opacity-20"
+            >
+              <Link size={16} />
+              Connect Drive
+            </a>
+          </div>
+        </div>
+      )}
+      
+      {/* Google Drive Explorer Panel */}
+      {driveConnected && (
+        <div className="mb-6 card-glass p-6">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <HardDrive className="text-green-400" size={24} />
+              <h2 className="text-xl font-bold">Google Drive Assets</h2>
+              <span className="px-2 py-1 text-xs bg-green-500 bg-opacity-20 rounded">Connected</span>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setDriveView('folders')}
+                className={`px-3 py-1 rounded text-sm ${driveView === 'folders' ? 'bg-blue-500 bg-opacity-30' : 'glass'}`}
+              >
+                Folders
+              </button>
+              <button
+                onClick={loadDriveFolders}
+                className="btn-glass p-2 rounded"
+                disabled={loadingDrive}
+              >
+                <RefreshCw size={16} className={loadingDrive ? 'animate-spin' : ''} />
+              </button>
+            </div>
+          </div>
+          
+          {/* Search Bar */}
+          <div className="mb-4 flex gap-2">
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyPress={(e) => e.key === 'Enter' && searchDriveFiles()}
+              placeholder="Search files across all drives..."
+              className="flex-1 glass px-4 py-2 rounded-lg"
+            />
+            <button
+              onClick={searchDriveFiles}
+              className="btn-glass px-4 py-2 rounded-lg"
+            >
+              <Search size={16} />
+            </button>
+          </div>
+          
+          {/* Drive Content Display */}
+          {loadingDrive ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader className="animate-spin" size={24} />
+            </div>
+          ) : driveView === 'folders' ? (
+            <div className="space-y-4">
+              {/* MyDrive Folders */}
+              <div>
+                <h3 className="text-sm font-medium mb-2 opacity-70">My Drive</h3>
+                <div className="grid grid-cols-2 gap-2">
+                  {driveFolders.slice(0, 6).map(folder => (
+                    <div key={folder.id} className="glass p-3 rounded-lg flex items-center justify-between">
+                      <div className="flex items-center gap-2 flex-1">
+                        <FolderOpen size={16} className="text-blue-400" />
+                        <span className="text-sm truncate">{folder.name}</span>
+                      </div>
+                      <div className="flex gap-1">
+                        <button
+                          onClick={() => loadFolderContents(folder.id)}
+                          className="btn-glass p-1 rounded text-xs"
+                          title="Browse"
+                        >
+                          <Eye size={14} />
+                        </button>
+                        <button
+                          onClick={() => syncFolderToDatabase({ ...folder, driveId: folder.id, name: folder.name })}
+                          className="btn-glass p-1 rounded text-xs"
+                          title="Sync for AI"
+                          disabled={syncingFolder}
+                        >
+                          {syncingFolder ? (
+                            <Loader size={14} className="animate-spin" />
+                          ) : (
+                            <Sparkles size={14} />
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              
+              {/* Shared Drives */}
+              {sharedDrives.length > 0 && (
+                <div>
+                  <h3 className="text-sm font-medium mb-2 opacity-70">Shared Drives</h3>
+                  <div className="space-y-2">
+                    {sharedDrives.map(drive => (
+                      <div key={drive.driveId} className="glass p-2 rounded-lg">
+                        <div className="flex items-center gap-2 mb-2">
+                          <Users size={16} className="text-purple-400" />
+                          <span className="text-sm font-medium">{drive.driveName}</span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          {drive.folders.slice(0, 4).map(folder => (
+                            <div key={folder.id} className="glass p-2 rounded flex items-center justify-between">
+                              <span className="text-xs truncate flex-1">{folder.name}</span>
+                              <button
+                                onClick={() => loadFolderContents(folder.id, true)}
+                                className="btn-glass p-1 rounded text-xs"
+                              >
+                                <Eye size={12} />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            // Folder Contents View
+            <div>
+              <button
+                onClick={() => setDriveView('folders')}
+                className="mb-3 text-sm opacity-70 hover:opacity-100"
+              >
+                ← Back to folders
+              </button>
+              <div className="grid grid-cols-3 gap-2">
+                {folderContents.map(file => (
+                  <div key={file.id} className="glass p-3 rounded-lg">
+                    <div className="flex items-center gap-2 mb-2">
+                      <FileText size={14} className="text-gray-400" />
+                      <span className="text-xs truncate">{file.name}</span>
+                    </div>
+                    {file.thumbnailLink && (
+                      <img src={file.thumbnailLink} alt={file.name} className="w-full h-20 object-cover rounded mb-2" />
+                    )}
+                    <button
+                      onClick={() => importDriveAsset(file)}
+                      className="w-full btn-glass py-1 text-xs rounded"
+                    >
+                      Import
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+      
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
-        {/* 1. CGI Image Proposals */}
+        {/* 1. CGI Image Proposals - Enhanced with Drive Integration */}
         <div className="card-glass p-6">
           <div className="flex items-center gap-2 mb-4">
             <Image className="text-blue-400" size={24} />
             <h2 className="text-xl font-bold">CGI Image Proposals</h2>
+          </div>
+          
+          {/* Brand Source Toggle */}
+          <div className="mb-3 flex gap-2">
+            <button
+              onClick={() => setBrandSource('local')}
+              className={`flex-1 px-2 py-1 rounded text-sm ${
+                brandSource === 'local' ? 'bg-blue-500 bg-opacity-30' : 'glass'
+              }`}
+            >
+              Local Brands
+            </button>
+            <button
+              onClick={() => setBrandSource('drive')}
+              className={`flex-1 px-2 py-1 rounded text-sm ${
+                brandSource === 'drive' ? 'bg-blue-500 bg-opacity-30' : 'glass'
+              }`}
+              disabled={!driveConnected}
+            >
+              Drive Brands
+            </button>
           </div>
           
           {/* Brand Selector */}
@@ -243,14 +607,38 @@ const ProductionTab = () => {
                 className="w-full glass px-4 py-2 rounded-lg appearance-none pr-10"
               >
                 <option value="">Select Brand...</option>
-                {brandFolders.map(brand => (
-                  <option key={brand.id} value={brand.id}>
-                    {brand.name}
-                  </option>
-                ))}
+                {brandFolders
+                  .filter(b => b.source === brandSource)
+                  .map(brand => (
+                    <option key={brand.id} value={brand.id}>
+                      {brand.name} {brand.synced ? '✨' : ''}
+                    </option>
+                  ))
+                }
               </select>
               <ChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 pointer-events-none" size={16} />
             </div>
+            {selectedBrand && brandFolders.find(b => b.id === selectedBrand)?.source === 'drive' && (
+              <div className="mt-2 flex gap-2">
+                <a
+                  href={brandFolders.find(b => b.id === selectedBrand)?.webViewLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs text-blue-400 hover:underline"
+                >
+                  View in Drive →
+                </a>
+                {!brandFolders.find(b => b.id === selectedBrand)?.synced && (
+                  <button
+                    onClick={() => syncFolderToDatabase(brandFolders.find(b => b.id === selectedBrand))}
+                    className="text-xs text-green-400 hover:underline"
+                    disabled={syncingFolder}
+                  >
+                    {syncingFolder ? 'Syncing...' : 'Sync for AI →'}
+                  </button>
+                )}
+              </div>
+            )}
           </div>
           
           {/* Model Choice */}
@@ -465,7 +853,7 @@ const ProductionTab = () => {
           )}
         </div>
         
-        {/* 3. Video Generation */}
+        {/* 3. Video Generation - Enhanced with Drive Assets */}
         <div className="card-glass p-6">
           <div className="flex items-center gap-2 mb-4">
             <Sparkles className="text-green-400" size={24} />
@@ -499,7 +887,9 @@ const ProductionTab = () => {
           
           {/* Input Assets */}
           <div className="mb-4">
-            <label className="block text-sm font-medium mb-2">Input Assets</label>
+            <label className="block text-sm font-medium mb-2">
+              Input Assets ({selectedAssets.length})
+            </label>
             <div className="glass p-4 rounded-lg">
               <input
                 type="file"
@@ -517,16 +907,22 @@ const ProductionTab = () => {
                 <span className="text-sm">Drop assets or click to upload</span>
               </label>
               
-              {/* Selected Assets Preview */}
+              {/* Selected Assets Preview - Now includes Drive assets */}
               {selectedAssets.length > 0 && (
                 <div className="mt-3 flex gap-2 flex-wrap">
                   {selectedAssets.map((asset, idx) => (
                     <div key={idx} className="relative">
-                      <img 
-                        src={asset} 
-                        alt={`Asset ${idx + 1}`}
-                        className="w-16 h-16 object-cover rounded"
-                      />
+                      {typeof asset === 'object' && asset.source === 'drive' ? (
+                        <div className="w-16 h-16 glass rounded flex items-center justify-center">
+                          <FileText size={20} className="text-blue-400" />
+                        </div>
+                      ) : (
+                        <img 
+                          src={typeof asset === 'object' ? asset.url : asset} 
+                          alt={`Asset ${idx + 1}`}
+                          className="w-16 h-16 object-cover rounded"
+                        />
+                      )}
                       <button
                         onClick={() => setSelectedAssets(selectedAssets.filter((_, i) => i !== idx))}
                         className="absolute -top-1 -right-1 bg-red-500 rounded-full p-1"
@@ -601,20 +997,24 @@ const ProductionTab = () => {
         
       </div>
       
-      {/* Brand Context Training Tips */}
+      {/* Brand Context Training Tips - Enhanced with Drive Info */}
       <div className="mt-8 card-glass p-6">
         <h3 className="text-lg font-bold mb-3">🎯 Model Training & Optimization</h3>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-sm">
           <div className="glass p-4 rounded-lg">
             <h4 className="font-medium text-blue-400 mb-2">Brand Context</h4>
             <p className="opacity-70">Each brand folder contains metadata for tone, style, and visual language that automatically enhances prompts.</p>
           </div>
           <div className="glass p-4 rounded-lg">
-            <h4 className="font-medium text-purple-400 mb-2">Reference Learning</h4>
+            <h4 className="font-medium text-purple-400 mb-2">Drive Integration</h4>
+            <p className="opacity-70">Sync Google Drive folders to provide AI with brand guidelines, assets, and reference materials.</p>
+          </div>
+          <div className="glass p-4 rounded-lg">
+            <h4 className="font-medium text-green-400 mb-2">Reference Learning</h4>
             <p className="opacity-70">Previous successful generations are stored and used to fine-tune future prompts for consistency.</p>
           </div>
           <div className="glass p-4 rounded-lg">
-            <h4 className="font-medium text-green-400 mb-2">Performance Metrics</h4>
+            <h4 className="font-medium text-yellow-400 mb-2">Performance Metrics</h4>
             <p className="opacity-70">Client approval rates and engagement data help refine the generation parameters over time.</p>
           </div>
         </div>
