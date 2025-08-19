@@ -65,6 +65,12 @@ if (fs.existsSync(path.join(__dirname, 'src/routes/authRoutes.js'))) {
   console.log('🔐 Google OAuth routes loaded - visit /auth/google to authenticate');
 }
 
+// Load enhanced AI routes with company context
+if (fs.existsSync(path.join(__dirname, 'src/routes/ai-enhanced.js'))) {
+  require('./src/routes/ai-enhanced');
+  console.log('🤖 Enhanced AI routes with company context loaded');
+}
+
 // Load Google Drive routes
 if (fs.existsSync(path.join(__dirname, 'src/routes/driveRoutes.js'))) {
   const driveRoutes = require('./src/routes/driveRoutes');
@@ -144,7 +150,7 @@ server.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`📊 Dashboard: http://localhost:${PORT}/health`);
   console.log('🔗 WebSocket server active');
-  console.log('🤖 AI services ready with memory and modes');
+  console.log('🤖 AI services ready with memory, modes, and company context');
   
   // Show OAuth setup reminder if not configured
   if (!process.env.GOOGLE_REFRESH_TOKEN) {
