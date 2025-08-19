@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import io from 'socket.io-client';
-import { Send, MessageCircle, Users, Clock, RotateCcw, ChevronDown, Calendar, Plus, Archive, Mail, CheckCircle } from 'lucide-react';
+import { Send, MessageCircle, Users, Clock, RotateCcw, ChevronDown, Calendar, Plus, Archive, Mail, CheckCircle, LogOut, User } from 'lucide-react';
 import MagicInbox from './components/MagicInbox';
 import SupaDashboard from './components/SupaDashboard';
 import ProductionTab from './components/ProductionTab';
@@ -34,6 +34,8 @@ const App = () => {
   const [availableTeamMembers, setAvailableTeamMembers] = useState(['All']);
   const [archivingEmails, setArchivingEmails] = useState({});
   const [archivedEmails, setArchivedEmails] = useState({});
+  const [userEmail, setUserEmail] = useState(null);
+  const [showUserMenu, setShowUserMenu] = useState(false);
 
   // Use useMemo to prevent recreating on every render
   const teamMembers = useMemo(() => ['All', 'Alec', 'Leo', 'Steph', 'Pablo', 'Alexa', 'Anthony', 'Dany', 'Mathieu'], []);
@@ -73,6 +75,64 @@ const App = () => {
     }
   }, []);
 
+  // Load user profile information
+  const loadUserProfile = async () => {
+    try {
+      const response = await fetch('http://localhost:3001/api/auth/profile');
+      const data = await response.json();
+      if (data.success && data.profile && data.profile.email) {
+        setUserEmail(data.profile.email);
+        localStorage.setItem('userEmail', data.profile.email);
+      } else {
+        // Try to get from localStorage as fallback
+        const storedEmail = localStorage.getItem('userEmail');
+        if (storedEmail) {
+          setUserEmail(storedEmail);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load user profile:', error);
+      // Try to get from localStorage as fallback
+      const storedEmail = localStorage.getItem('userEmail');
+      if (storedEmail) {
+        setUserEmail(storedEmail);
+      }
+    }
+  };
+
+  // Logout function to clear all integrations
+  const handleLogout = async () => {
+    if (!window.confirm('Are you sure you want to logout? This will clear all integration tokens.')) {
+      return;
+    }
+
+    try {
+      // Clear all stored tokens and data
+      localStorage.clear();
+      sessionStorage.clear();
+      
+      // Call backend to clear server-side tokens if needed
+      await fetch('http://localhost:3001/api/auth/logout', {
+        method: 'POST',
+        credentials: 'include'
+      });
+      
+      // Reset state
+      setUserEmail(null);
+      setApiStatus({});
+      setIsConnected(false);
+      
+      // Reload the page to reset everything
+      window.location.reload();
+    } catch (error) {
+      console.error('Logout error:', error);
+      // Still clear local data even if backend fails
+      localStorage.clear();
+      sessionStorage.clear();
+      window.location.reload();
+    }
+  };
+
   useEffect(() => {
     const socket = io('http://localhost:3001');
     socket.on('connect', () => setIsConnected(true));
@@ -91,6 +151,7 @@ const App = () => {
     loadMeetings();
     loadCalendarEvents();
     loadApiStatus();
+    loadUserProfile();
     
     // Check for saved dark mode preference, default to true
     const savedDarkMode = localStorage.getItem('darkMode');
@@ -480,21 +541,6 @@ const App = () => {
     }
   };
 
-  const testAI = async () => {
-    try {
-      const response = await fetch('http://localhost:3001/api/ai-test', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: 'Test message' })
-      });
-      const result = await response.json();
-      console.log('AI Test Result:', result);
-      loadNotionTasks();
-    } catch (error) {
-      console.error('AI test failed:', error);
-    }
-  };
-
   const completeTask = async (taskId) => {
     try {
       const response = await fetch(`http://localhost:3001/api/tasks/${taskId}/complete`, {
@@ -581,9 +627,56 @@ const App = () => {
               </span>
             </button>
             
-            <button onClick={testAI} className="btn-glass px-4 py-2 rounded-lg">
-              🧪 Test AI
-            </button>
+            {/* User Menu */}
+            <div className="relative">
+              <button
+                onClick={() => setShowUserMenu(!showUserMenu)}
+                className="btn-glass px-3 py-2 rounded-lg flex items-center gap-2"
+              >
+                <User size={16} />
+                {userEmail ? (
+                  <span className="text-sm max-w-[150px] truncate">{userEmail}</span>
+                ) : (
+                  <span className="text-sm">Not logged in</span>
+                )}
+                <ChevronDown size={14} className={`transition-transform ${showUserMenu ? 'rotate-180' : ''}`} />
+              </button>
+              
+              {showUserMenu && (
+                <div className="absolute top-full right-0 mt-2 w-48 glass rounded-lg overflow-hidden">
+                  {userEmail && (
+                    <div className="px-4 py-3 border-b border-gray-700">
+                      <p className="text-xs opacity-60">Logged in as</p>
+                      <p className="text-sm font-medium truncate">{userEmail}</p>
+                    </div>
+                  )}
+                  
+                  {!userEmail && (
+                    <a
+                      href="http://localhost:3001/auth/google"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block px-4 py-3 hover:bg-white hover:bg-opacity-10 transition-all"
+                    >
+                      <div className="flex items-center gap-2">
+                        <User size={14} />
+                        <span className="text-sm">Login with Google</span>
+                      </div>
+                    </a>
+                  )}
+                  
+                  <button
+                    onClick={handleLogout}
+                    className="w-full px-4 py-3 hover:bg-white hover:bg-opacity-10 transition-all text-left"
+                  >
+                    <div className="flex items-center gap-2 text-red-400">
+                      <LogOut size={14} />
+                      <span className="text-sm">Logout</span>
+                    </div>
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
         
