@@ -115,6 +115,66 @@ class IntegrationService {
     }
   }
 
+  // NEW: Get email thread with full conversation context
+  async getEmailThread(threadId) {
+    try {
+      // Check if this is a mock thread
+      if (threadId && threadId.startsWith('mock-')) {
+        console.log('📧 Returning mock thread for:', threadId);
+        return {
+          success: true,
+          threadId: threadId,
+          messages: [
+            {
+              id: threadId,
+              threadId: threadId,
+              from: 'Mock Sender <mock@example.com>',
+              to: 'you@example.com',
+              subject: 'Mock Thread',
+              date: new Date().toISOString(),
+              snippet: 'This is a mock email thread for testing...',
+              body: 'Full mock email body content here...',
+              isUnread: false,
+              contact: {
+                found: false,
+                type: 'unknown',
+                email: 'mock@example.com'
+              }
+            }
+          ],
+          messageCount: 1
+        };
+      }
+
+      // Use the Gmail service to get the thread
+      const result = await this.gmailService.getEmailThread(threadId);
+      
+      if (result.success) {
+        console.log(`📧 Retrieved thread ${threadId} with ${result.messageCount} messages`);
+        return result;
+      } else {
+        // Return empty thread on error
+        console.log('⚠️ Failed to get thread, returning empty');
+        return {
+          success: false,
+          error: result.error,
+          threadId: threadId,
+          messages: [],
+          messageCount: 0
+        };
+      }
+    } catch (error) {
+      console.error('Failed to get email thread:', error);
+      return {
+        success: false,
+        error: error.message,
+        threadId: threadId,
+        messages: [],
+        messageCount: 0
+      };
+    }
+  }
+
   // ENHANCED: Get email statistics
   async getEmailStats() {
     try {
