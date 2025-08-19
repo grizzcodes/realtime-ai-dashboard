@@ -1,71 +1,109 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { Send, Bot, User, Sparkles, RefreshCw, Database, Users } from 'lucide-react';
 
-const AIChatbox = ({ socket, apiStatus }) => {
-  const [isOpen, setIsOpen] = useState(false);
+export default function AIChatbox() {
   const [messages, setMessages] = useState([
-    {
-      role: 'assistant',
-      content: 'Hello! I\'m your AI assistant. How can I help you today?',
-      timestamp: new Date()
+    { 
+      role: 'assistant', 
+      content: 'Hello! I\'m your AI assistant with access to the DGenz company database. I can help you with information about people, clients, leads, projects, and more. What would you like to know?' 
     }
   ]);
-  const [inputValue, setInputValue] = useState('');
+  const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [contextEnabled, setContextEnabled] = useState(true);
+  const [companyStats, setCompanyStats] = useState(null);
   const messagesEndRef = useRef(null);
-
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  };
 
   useEffect(() => {
     scrollToBottom();
+    loadCompanyStats();
   }, [messages]);
 
-  const sendMessage = async () => {
-    if (!inputValue.trim()) return;
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
 
-    const userMessage = {
-      role: 'user',
-      content: inputValue,
-      timestamp: new Date()
-    };
+  const loadCompanyStats = async () => {
+    try {
+      const response = await fetch('http://localhost:3001/api/ai/company-context');
+      const data = await response.json();
+      
+      if (data.success && data.context) {
+        setCompanyStats({
+          people: data.context.people.total,
+          clients: data.context.clients.total,
+          leads: data.context.leads.total,
+          projects: data.context.projects.total
+        });
+      }
+    } catch (error) {
+      console.error('Failed to load company stats:', error);
+    }
+  };
 
+  const handleSend = async () => {
+    if (!input.trim() || isLoading) return;
+
+    const userMessage = { role: 'user', content: input };
     setMessages(prev => [...prev, userMessage]);
-    setInputValue('');
+    setInput('');
     setIsLoading(true);
 
     try {
-      const response = await fetch('http://localhost:3002/api/ai-chat', {
+      // Use enhanced endpoint with context
+      const response = await fetch('http://localhost:3001/api/ai/chat-enhanced', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          message: inputValue,
-          conversationHistory: messages
+          message: input,
+          model: 'gpt-4',
+          includeContext: contextEnabled
         })
       });
 
       const data = await response.json();
-      
+
       if (data.success) {
-        const assistantMessage = {
+        setMessages(prev => [...prev, {
           role: 'assistant',
           content: data.response,
-          timestamp: new Date()
-        };
-        
-        setMessages(prev => [...prev, assistantMessage]);
+          contextIncluded: data.contextIncluded
+        }]);
       } else {
-        throw new Error(data.error || 'Failed to get AI response');
+        // Fallback to standard endpoint if enhanced fails
+        const fallbackResponse = await fetch('http://localhost:3001/api/ai/chat', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            message: input,
+            model: 'gpt-4'
+          })
+        });
+
+        const fallbackData = await fallbackResponse.json();
+        
+        if (fallbackData.success) {
+          setMessages(prev => [...prev, {
+            role: 'assistant',
+            content: fallbackData.response
+          }]);
+        } else {
+          setMessages(prev => [...prev, {
+            role: 'assistant',
+            content: 'I apologize, but I\'m having trouble connecting right now. Please try again later.'
+          }]);
+        }
       }
     } catch (error) {
-      const errorMessage = {
+      console.error('Chat error:', error);
+      setMessages(prev => [...prev, {
         role: 'assistant',
-        content: `Sorry, I encountered an error: ${error.message}. Please make sure the backend server is running.`,
-        timestamp: new Date()
-      };
-      setMessages(prev => [...prev, errorMessage]);
+        content: 'I encountered an error. Please check your connection and try again.'
+      }]);
     } finally {
       setIsLoading(false);
     }
@@ -74,123 +112,179 @@ const AIChatbox = ({ socket, apiStatus }) => {
   const handleKeyPress = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      sendMessage();
+      handleSend();
+    }
+  };
+
+  const refreshContext = async () => {
+    try {
+      const response = await fetch('http://localhost:3001/api/ai/refresh-context', {
+        method: 'POST'
+      });
+      const data = await response.json();
+      
+      if (data.success) {
+        setCompanyStats(data.stats);
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          content: `✅ Context refreshed! I now have updated information about ${data.stats.people} people, ${data.stats.clients} clients, ${data.stats.leads} leads, and ${data.stats.projects} projects.`
+        }]);
+      }
+    } catch (error) {
+      console.error('Failed to refresh context:', error);
     }
   };
 
   return (
-    <>
-      {/* Bottom Center Chat Bar */}
-      <div className="fixed bottom-6 left-1/2 transform -translate-x-1/2 z-50">
-        {!isOpen ? (
-          // Collapsed Chat Bar
-          <div 
-            onClick={() => setIsOpen(true)}
-            className="bg-gradient-to-r from-orange-400 to-orange-600 hover:from-orange-500 hover:to-orange-700 text-white px-8 py-4 rounded-2xl shadow-2xl cursor-pointer transition-all duration-300 hover:scale-105 flex items-center gap-4 min-w-[400px] justify-center"
-          >
-            <span className="text-2xl">🤖</span>
-            <span className="font-semibold text-lg">CHAT</span>
-            <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
+    <div className="card-glass h-full flex flex-col">
+      {/* Header with context status */}
+      <div className="p-4 border-b border-gray-700">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Bot className="text-blue-400" size={20} />
+            <h3 className="font-bold">AI Assistant</h3>
+            <Sparkles className="text-yellow-400" size={16} />
           </div>
-        ) : (
-          // Expanded Chat Interface
-          <div className="bg-white rounded-2xl shadow-2xl border border-gray-200 flex flex-col w-[800px] h-[400px]">
-            {/* Header */}
-            <div className="flex items-center justify-between p-4 border-b bg-gradient-to-r from-orange-400 to-orange-600 text-white rounded-t-2xl">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center">
-                  <span className="text-xl">🤖</span>
-                </div>
-                <div>
-                  <div className="font-semibold">AI Assistant</div>
-                  <div className="text-xs text-orange-100">Ready to help</div>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
-                <button
-                  onClick={() => setIsOpen(false)}
-                  className="text-white hover:text-gray-200 transition-colors p-1 rounded hover:bg-white/10"
-                >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                  </svg>
-                </button>
-              </div>
-            </div>
+          <div className="flex items-center gap-2">
+            {/* Context toggle */}
+            <button
+              onClick={() => setContextEnabled(!contextEnabled)}
+              className={`px-3 py-1 rounded-lg text-xs flex items-center gap-1 transition-all ${
+                contextEnabled 
+                  ? 'bg-green-500 bg-opacity-20 text-green-400' 
+                  : 'bg-gray-500 bg-opacity-20 text-gray-400'
+              }`}
+              title="Toggle company database context"
+            >
+              <Database size={12} />
+              {contextEnabled ? 'Context ON' : 'Context OFF'}
+            </button>
+            
+            {/* Refresh context */}
+            <button
+              onClick={refreshContext}
+              className="p-1 hover:bg-white hover:bg-opacity-10 rounded"
+              title="Refresh company data"
+            >
+              <RefreshCw size={16} />
+            </button>
+          </div>
+        </div>
+        
+        {/* Company stats bar */}
+        {companyStats && contextEnabled && (
+          <div className="mt-2 flex gap-3 text-xs opacity-60">
+            <span className="flex items-center gap-1">
+              <Users size={10} />
+              {companyStats.people} people
+            </span>
+            <span>•</span>
+            <span>{companyStats.clients} clients</span>
+            <span>•</span>
+            <span>{companyStats.leads} leads</span>
+            <span>•</span>
+            <span>{companyStats.projects} projects</span>
+          </div>
+        )}
+      </div>
 
-            {/* Messages */}
-            <div className="flex-1 p-4 overflow-y-auto bg-gradient-to-b from-gray-50 to-white">
-              {messages.map((message, index) => (
-                <div
-                  key={index}
-                  className={`mb-4 ${
-                    message.role === 'user' ? 'text-right' : 'text-left'
-                  }`}
-                >
-                  <div
-                    className={`inline-block max-w-[70%] p-3 text-sm transition-all duration-200 ${
-                      message.role === 'user'
-                        ? 'bg-gradient-to-r from-orange-500 to-orange-600 text-white rounded-2xl rounded-br-md shadow-lg'
-                        : 'bg-white text-gray-800 shadow-md border border-gray-100 rounded-2xl rounded-bl-md'
-                    }`}
-                  >
-                    {message.content}
-                  </div>
-                  <div className="text-xs text-gray-400 mt-1 px-1">
-                    {message.timestamp.toLocaleTimeString([], { 
-                      hour: '2-digit', 
-                      minute: '2-digit' 
-                    })}
-                  </div>
-                </div>
-              ))}
-              {isLoading && (
-                <div className="text-left mb-4">
-                  <div className="inline-block bg-white text-gray-800 p-3 rounded-2xl rounded-bl-md shadow-md border border-gray-100">
-                    <div className="flex items-center gap-1">
-                      <div className="w-2 h-2 bg-orange-400 rounded-full animate-bounce"></div>
-                      <div className="w-2 h-2 bg-orange-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
-                      <div className="w-2 h-2 bg-orange-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
-                    </div>
-                  </div>
-                </div>
-              )}
-              <div ref={messagesEndRef} />
-            </div>
-
-            {/* Input */}
-            <div className="p-4 border-t bg-white rounded-b-2xl">
-              <div className="flex gap-3">
-                <input
-                  type="text"
-                  value={inputValue}
-                  onChange={(e) => setInputValue(e.target.value)}
-                  onKeyPress={handleKeyPress}
-                  placeholder="Type your message..."
-                  className="flex-1 px-4 py-3 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent transition-all duration-200"
-                  disabled={isLoading}
-                />
-                <button
-                  onClick={sendMessage}
-                  disabled={isLoading || !inputValue.trim()}
-                  className="px-6 py-3 bg-gradient-to-r from-orange-500 to-orange-600 text-white rounded-xl hover:from-orange-600 hover:to-orange-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 text-sm font-medium hover:scale-105"
-                >
-                  {isLoading ? (
-                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                  ) : (
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-                    </svg>
+      {/* Messages */}
+      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        {messages.map((message, index) => (
+          <div
+            key={index}
+            className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
+          >
+            <div
+              className={`max-w-[80%] p-3 rounded-lg ${
+                message.role === 'user'
+                  ? 'bg-blue-600 bg-opacity-20 text-blue-100'
+                  : 'bg-gray-700 bg-opacity-50'
+              }`}
+            >
+              <div className="flex items-start gap-2">
+                {message.role === 'assistant' ? (
+                  <Bot size={16} className="text-blue-400 mt-1" />
+                ) : (
+                  <User size={16} className="text-blue-400 mt-1" />
+                )}
+                <div className="flex-1">
+                  <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+                  {message.contextIncluded && (
+                    <p className="text-xs opacity-50 mt-1">
+                      <Database size={10} className="inline mr-1" />
+                      Used company context
+                    </p>
                   )}
-                </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        ))}
+        {isLoading && (
+          <div className="flex justify-start">
+            <div className="bg-gray-700 bg-opacity-50 p-3 rounded-lg">
+              <div className="flex items-center gap-2">
+                <Bot size={16} className="text-blue-400" />
+                <div className="flex gap-1">
+                  <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" />
+                  <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce delay-100" />
+                  <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce delay-200" />
+                </div>
               </div>
             </div>
           </div>
         )}
+        <div ref={messagesEndRef} />
       </div>
-    </>
-  );
-};
 
-export default AIChatbox;
+      {/* Input */}
+      <div className="p-4 border-t border-gray-700">
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyPress={handleKeyPress}
+            placeholder={contextEnabled 
+              ? "Ask about people, clients, projects..." 
+              : "Ask me anything..."
+            }
+            className="flex-1 px-3 py-2 bg-gray-800 bg-opacity-50 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+            disabled={isLoading}
+          />
+          <button
+            onClick={handleSend}
+            disabled={isLoading || !input.trim()}
+            className="px-4 py-2 bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+          >
+            <Send size={16} />
+          </button>
+        </div>
+        
+        {/* Example queries */}
+        <div className="mt-2 flex flex-wrap gap-2">
+          <span className="text-xs opacity-50">Try:</span>
+          <button
+            onClick={() => setInput("Who are the people in the company?")}
+            className="text-xs px-2 py-1 bg-gray-700 bg-opacity-50 rounded hover:bg-opacity-70"
+          >
+            List people
+          </button>
+          <button
+            onClick={() => setInput("What are our active projects?")}
+            className="text-xs px-2 py-1 bg-gray-700 bg-opacity-50 rounded hover:bg-opacity-70"
+          >
+            Active projects
+          </button>
+          <button
+            onClick={() => setInput("Show me our hot leads")}
+            className="text-xs px-2 py-1 bg-gray-700 bg-opacity-50 rounded hover:bg-opacity-70"
+          >
+            Hot leads
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
