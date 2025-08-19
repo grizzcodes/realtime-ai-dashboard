@@ -8,6 +8,7 @@ class AIContextService {
     this.supabase = supabaseService || new SupabaseService();
     this.contextCache = null;
     this.cacheExpiry = null;
+    this.emailDirectory = new Map(); // Quick lookup for emails
   }
 
   // Build comprehensive context about the company
@@ -29,12 +30,43 @@ class AIContextService {
         this.supabase.supabase.from('tasks').select('*')
       ]);
 
+      // Build email directory for quick lookup
+      this.emailDirectory.clear();
+      
+      // Add people emails
+      if (people.data) {
+        people.data.forEach(p => {
+          if (p.email) {
+            this.emailDirectory.set(p.name?.toLowerCase(), p.email);
+            // Also store by first name only
+            const firstName = p.name?.split(' ')[0]?.toLowerCase();
+            if (firstName) {
+              this.emailDirectory.set(firstName, p.email);
+            }
+          }
+        });
+      }
+      
+      // Add client emails
+      if (clients.data) {
+        clients.data.forEach(c => {
+          if (c.email) {
+            this.emailDirectory.set(c.name?.toLowerCase(), c.email);
+            const firstName = c.name?.split(' ')[0]?.toLowerCase();
+            if (firstName) {
+              this.emailDirectory.set(firstName, c.email);
+            }
+          }
+        });
+      }
+
       // Build structured context
       const context = {
         company: {
           name: 'DGenz',
           description: 'AI-powered creative agency and production company',
-          focus: 'AI integration, creative production, digital innovation'
+          focus: 'AI integration, creative production, digital innovation',
+          domain: 'dgenz.world'
         },
         people: {
           total: people.data?.length || 0,
@@ -54,6 +86,7 @@ class AIContextService {
           list: (clients.data || []).map(c => ({
             name: c.name,
             company: c.company,
+            email: c.email,
             industry: c.industry,
             status: c.status,
             value: c.contract_value,
@@ -66,6 +99,7 @@ class AIContextService {
           list: (leads.data || []).map(l => ({
             name: l.name,
             company: l.company,
+            email: l.email,
             status: l.status,
             temperature: l.temperature,
             source: l.source,
@@ -104,6 +138,7 @@ class AIContextService {
       this.cacheExpiry = Date.now() + (5 * 60 * 1000); // 5 minute cache
 
       console.log(`✅ AI context built: ${context.people.total} people, ${context.clients.total} clients, ${context.leads.total} leads`);
+      console.log(`📧 Email directory contains ${this.emailDirectory.size} entries`);
       
       return context;
     } catch (error) {
@@ -116,6 +151,38 @@ class AIContextService {
         leads: { total: 0, list: [] }
       };
     }
+  }
+
+  // Get email for a person by name
+  async getEmailForPerson(name) {
+    // Ensure context is loaded
+    if (!this.contextCache) {
+      await this.buildCompanyContext();
+    }
+    
+    // Check email directory
+    const nameLower = name?.toLowerCase();
+    if (this.emailDirectory.has(nameLower)) {
+      return this.emailDirectory.get(nameLower);
+    }
+    
+    // Try first name only
+    const firstName = name?.split(' ')[0]?.toLowerCase();
+    if (firstName && this.emailDirectory.has(firstName)) {
+      return this.emailDirectory.get(firstName);
+    }
+    
+    // If name is "alec" specifically, use the known email
+    if (nameLower === 'alec' || nameLower === 'alec chapados') {
+      return 'alec@dgenz.world';
+    }
+    
+    // Fallback: construct email from name and company domain
+    if (firstName) {
+      return `${firstName}@dgenz.world`;
+    }
+    
+    return null;
   }
 
   // Get specific person by name or email
@@ -193,16 +260,22 @@ You have access to DGenz company database with the following information:
 
 COMPANY OVERVIEW:
 - Company: ${context.company.name}
+- Domain: @dgenz.world
 - Focus: ${context.company.focus}
 
 PEOPLE IN THE COMPANY (${context.people.total} total):
 ${context.people.list.map(p => `- ${p.name}${p.role ? ` (${p.role})` : ''}${p.email ? ` - ${p.email}` : ''}`).join('\n')}
 
+EMAIL DIRECTORY:
+- When someone mentions a person's name, you can find their email in the database
+- Default company domain is @dgenz.world
+- For example: Alec's email is alec@dgenz.world
+
 CLIENTS (${context.clients.total} total, ${context.clients.active} active):
-${context.clients.list.slice(0, 10).map(c => `- ${c.name}${c.company ? ` at ${c.company}` : ''} (${c.status})`).join('\n')}
+${context.clients.list.slice(0, 10).map(c => `- ${c.name}${c.company ? ` at ${c.company}` : ''}${c.email ? ` - ${c.email}` : ''} (${c.status})`).join('\n')}
 
 LEADS (${context.leads.total} total, ${context.leads.hot} hot):
-${context.leads.list.slice(0, 10).map(l => `- ${l.name}${l.company ? ` at ${l.company}` : ''} (${l.temperature || l.status})`).join('\n')}
+${context.leads.list.slice(0, 10).map(l => `- ${l.name}${l.company ? ` at ${l.company}` : ''}${l.email ? ` - ${l.email}` : ''} (${l.temperature || l.status})`).join('\n')}
 
 ACTIVE PROJECTS (${context.projects.active} active):
 ${context.projects.list.filter(p => p.status === 'active').slice(0, 5).map(p => `- ${p.name} for ${p.client}`).join('\n')}
@@ -210,6 +283,8 @@ ${context.projects.list.filter(p => p.status === 'active').slice(0, 5).map(p => 
 CURRENT STATUS:
 - Tasks: ${context.tasks.total} total, ${context.tasks.pending} pending, ${context.tasks.overdue} overdue
 - Integrated tools: ${context.capabilities.tools.join(', ')}
+
+IMPORTANT: When creating calendar invites, always look up the person's email from the database. For example, if someone says "invite Alec", you should use alec@dgenz.world.
 
 You can answer questions about the people, clients, leads, and projects in the company based on this information.
 `;
@@ -229,7 +304,7 @@ You can answer questions about the people, clients, leads, and projects in the c
         if (searchResults.clients.length > 0) {
           aiPrompt += `\nClients found:`;
           searchResults.clients.forEach(c => {
-            aiPrompt += `\n- ${c.name} at ${c.company || 'Unknown company'} (${c.status})`;
+            aiPrompt += `\n- ${c.name} at ${c.company || 'Unknown company'} - ${c.email || 'No email'} (${c.status})`;
           });
         }
       }
@@ -242,6 +317,7 @@ You can answer questions about the people, clients, leads, and projects in the c
   clearCache() {
     this.contextCache = null;
     this.cacheExpiry = null;
+    this.emailDirectory.clear();
     console.log('🔄 AI context cache cleared');
   }
 }
