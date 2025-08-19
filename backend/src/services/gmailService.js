@@ -199,6 +199,98 @@ class GmailService {
     }
   }
 
+  // NEW: Get email thread with full conversation context
+  async getEmailThread(threadId) {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+
+    if (!this.initialized) {
+      return { success: false, error: 'Gmail not initialized' };
+    }
+
+    try {
+      console.log(`📧 Fetching thread: ${threadId}`);
+      
+      // Get thread details
+      const response = await this.gmail.users.threads.get({
+        userId: 'me',
+        id: threadId,
+        format: 'metadata',
+        metadataHeaders: ['From', 'To', 'Subject', 'Date']
+      });
+
+      const thread = response.data;
+      const messages = [];
+
+      // Process each message in the thread
+      for (const message of thread.messages || []) {
+        const from = this.getHeader(message.payload.headers, 'From');
+        const contact = this.matchEmailToContact(from);
+        
+        // Get message body
+        let body = message.snippet || '';
+        
+        // Try to get full body if available
+        if (message.payload.body?.data) {
+          try {
+            body = Buffer.from(message.payload.body.data, 'base64').toString();
+          } catch (e) {
+            // Use snippet if decoding fails
+            body = message.snippet || '';
+          }
+        } else if (message.payload.parts) {
+          // Look for text/plain or text/html parts
+          const textPart = message.payload.parts.find(part => 
+            part.mimeType === 'text/plain'
+          );
+          
+          if (textPart?.body?.data) {
+            try {
+              body = Buffer.from(textPart.body.data, 'base64').toString();
+            } catch (e) {
+              body = message.snippet || '';
+            }
+          }
+        }
+
+        messages.push({
+          id: message.id,
+          threadId: message.threadId,
+          from: from,
+          to: this.getHeader(message.payload.headers, 'To'),
+          subject: this.getHeader(message.payload.headers, 'Subject'),
+          date: this.getHeader(message.payload.headers, 'Date'),
+          snippet: message.snippet,
+          body: body.substring(0, 1000), // Limit for display
+          isUnread: message.labelIds?.includes('UNREAD') || false,
+          contact: contact,
+          internalDate: message.internalDate
+        });
+      }
+
+      // Sort messages by date (oldest first for natural reading)
+      messages.sort((a, b) => {
+        return parseInt(a.internalDate) - parseInt(b.internalDate);
+      });
+
+      console.log(`✅ Retrieved thread with ${messages.length} messages`);
+      
+      return {
+        success: true,
+        threadId: threadId,
+        messages: messages,
+        messageCount: messages.length
+      };
+    } catch (error) {
+      console.error('Failed to get email thread:', error.message);
+      return { 
+        success: false, 
+        error: error.message 
+      };
+    }
+  }
+
   // ENHANCED: Get more emails with contact matching
   async getRecentEmails(maxResults = 100) {
     if (!this.initialized) {
