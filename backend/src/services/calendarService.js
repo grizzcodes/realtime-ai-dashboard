@@ -206,6 +206,22 @@ class CalendarService {
     };
   }
 
+  async getUpcomingEvents(days = 7) {
+    // Alias for getUpcomingMeetings with a different interface
+    const limit = Math.min(days * 3, 50); // Rough estimate of events per day
+    const result = await this.getUpcomingMeetings(limit);
+    
+    if (result.success) {
+      return {
+        success: true,
+        events: result.meetings,
+        data: result.meetings
+      };
+    }
+    
+    return result;
+  }
+
   generateDemoMeetings(count = 5) {
     const now = new Date();
     const demoMeetings = [
@@ -293,43 +309,107 @@ class CalendarService {
 
   async createEvent(eventData) {
     if (!this.calendar) {
+      console.log('⚠️ Calendar not configured - cannot create real event');
       return { 
         success: false, 
-        error: 'Calendar not configured' 
+        error: 'Calendar not configured. Please set up Google OAuth first.',
+        needsAuth: true
       };
     }
 
     try {
+      console.log('📅 Creating calendar event:', eventData);
+      
+      // Ensure we have valid start and end times
+      const startDateTime = eventData.start?.dateTime || eventData.startTime;
+      const endDateTime = eventData.end?.dateTime || eventData.endTime;
+      
+      if (!startDateTime) {
+        return {
+          success: false,
+          error: 'Start time is required'
+        };
+      }
+
+      // If no end time provided, default to 1 hour after start
+      const endTime = endDateTime || new Date(new Date(startDateTime).getTime() + 60 * 60 * 1000).toISOString();
+
       const event = {
-        summary: eventData.title,
-        description: eventData.description,
+        summary: eventData.summary || eventData.title || 'Meeting',
+        description: eventData.description || '',
         start: {
-          dateTime: eventData.startTime,
-          timeZone: 'America/Los_Angeles',
+          dateTime: startDateTime,
+          timeZone: eventData.timeZone || 'America/Los_Angeles',
         },
         end: {
-          dateTime: eventData.endTime,
-          timeZone: 'America/Los_Angeles',
+          dateTime: endTime,
+          timeZone: eventData.timeZone || 'America/Los_Angeles',
         },
-        attendees: eventData.attendees?.map(email => ({ email })) || [],
-        reminders: {
-          useDefault: true,
+        attendees: eventData.attendees?.map(email => {
+          // Handle both string emails and object format
+          if (typeof email === 'string') {
+            return { email };
+          }
+          return email;
+        }) || [],
+        reminders: eventData.reminders || {
+          useDefault: false,
+          overrides: [
+            { method: 'email', minutes: 30 },
+            { method: 'popup', minutes: 10 }
+          ]
         },
       };
+
+      // Add location if provided
+      if (eventData.location) {
+        event.location = eventData.location;
+      }
+
+      // Add conference data if requested
+      if (eventData.conferenceData || eventData.addMeet) {
+        event.conferenceData = {
+          createRequest: {
+            requestId: `meet-${Date.now()}`,
+            conferenceSolutionKey: { type: 'hangoutsMeet' }
+          }
+        };
+      }
+
+      console.log('📅 Sending event to Google Calendar:', event);
 
       const response = await this.calendar.events.insert({
         calendarId: 'primary',
         resource: event,
+        conferenceDataVersion: eventData.addMeet ? 1 : 0,
+        sendUpdates: 'all' // Send invites to all attendees
       });
+
+      console.log('✅ Calendar event created successfully:', response.data.id);
 
       return {
         success: true,
-        event: response.data
+        data: response.data,
+        event: response.data,
+        eventId: response.data.id,
+        htmlLink: response.data.htmlLink,
+        message: `Event "${event.summary}" created successfully`
       };
     } catch (error) {
+      console.error('❌ Failed to create calendar event:', error);
+      
+      // Check for auth errors
+      if (error.code === 401 || error.message?.includes('invalid_grant')) {
+        return {
+          success: false,
+          error: 'Authentication expired. Please re-authenticate with Google.',
+          needsAuth: true
+        };
+      }
+      
       return {
         success: false,
-        error: error.message
+        error: error.message || 'Failed to create calendar event'
       };
     }
   }
