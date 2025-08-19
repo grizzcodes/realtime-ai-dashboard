@@ -1,6 +1,36 @@
 // backend/server.js - Gmail API Routes
 // Note: app and io are provided by main.js as global variables
 
+// Add Gmail thread endpoint
+app.get('/api/gmail/thread/:threadId', async (req, res) => {
+  try {
+    const { threadId } = req.params;
+    console.log(`📧 Fetching email thread: ${threadId}`);
+    
+    const result = await integrationService.getEmailThread(threadId);
+    
+    if (result.success) {
+      res.json({
+        success: true,
+        threadId: result.threadId,
+        messages: result.messages || [],
+        messageCount: result.messageCount || 0
+      });
+    } else {
+      res.status(400).json({
+        success: false,
+        error: result.error
+      });
+    }
+  } catch (error) {
+    console.error('❌ Failed to fetch email thread:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 // Add Gmail archive endpoint
 app.post('/api/gmail/archive/:emailId', async (req, res) => {
   try {
