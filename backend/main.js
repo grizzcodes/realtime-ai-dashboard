@@ -57,9 +57,16 @@ app.get('/health', (req, res) => {
 require('./server.js'); // Gmail routes
 require('./enhanced-endpoints.js'); // Additional endpoints
 
-// Check if Auth routes exist and load them
+// Load Enhanced Magic Inbox routes (NEW)
 const fs = require('fs');
 const path = require('path');
+if (fs.existsSync(path.join(__dirname, 'enhanced-magic-inbox-routes.js'))) {
+  const setupEnhancedMagicInbox = require('./enhanced-magic-inbox-routes');
+  setupEnhancedMagicInbox(app, io, integrationService);
+  console.log('✨ Enhanced Magic Inbox routes loaded - with smart filtering and checkable items');
+}
+
+// Check if Auth routes exist and load them
 if (fs.existsSync(path.join(__dirname, 'src/routes/authRoutes.js'))) {
   require('./src/routes/authRoutes')(app);
   console.log('🔐 Google OAuth routes loaded - visit /auth/google to authenticate');
