@@ -78,6 +78,12 @@ if (fs.existsSync(path.join(__dirname, 'src/routes/tokenRefreshRoute.js'))) {
   console.log('🔧 Token refresh route loaded - /api/auth/force-refresh-tokens');
 }
 
+// Load Calendar Fix Route (EMERGENCY FIX)
+if (fs.existsSync(path.join(__dirname, 'src/routes/calendarFixRoute.js'))) {
+  require('./src/routes/calendarFixRoute')(app);
+  console.log('🚨 CALENDAR FIX loaded - /api/calendar/fix-and-test');
+}
+
 // Load enhanced AI routes with company context
 if (fs.existsSync(path.join(__dirname, 'src/routes/ai-enhanced.js'))) {
   require('./src/routes/ai-enhanced');
@@ -171,6 +177,11 @@ server.listen(PORT, () => {
     console.log('⚠️  Gmail/Drive/Calendar Not Working? Fix it:');
     console.log(`   1. Re-authenticate: http://localhost:${PORT}/auth/google`);
     console.log(`   2. Then refresh tokens: http://localhost:${PORT}/api/auth/force-refresh-tokens`);
+    console.log('');
+  } else {
+    console.log('');
+    console.log('📅 Calendar still not working? Run emergency fix:');
+    console.log(`   http://localhost:${PORT}/api/calendar/fix-and-test`);
     console.log('');
   }
 });
