@@ -72,6 +72,12 @@ if (fs.existsSync(path.join(__dirname, 'src/routes/authRoutes.js'))) {
   console.log('🔐 Google OAuth routes loaded - visit /auth/google to authenticate');
 }
 
+// Load Token Refresh Route (IMPORTANT - Fixes permission issues)
+if (fs.existsSync(path.join(__dirname, 'src/routes/tokenRefreshRoute.js'))) {
+  require('./src/routes/tokenRefreshRoute')(app);
+  console.log('🔧 Token refresh route loaded - /api/auth/force-refresh-tokens');
+}
+
 // Load enhanced AI routes with company context
 if (fs.existsSync(path.join(__dirname, 'src/routes/ai-enhanced.js'))) {
   require('./src/routes/ai-enhanced');
@@ -162,8 +168,9 @@ server.listen(PORT, () => {
   // Show OAuth setup reminder if not configured
   if (!process.env.GOOGLE_REFRESH_TOKEN) {
     console.log('');
-    console.log('⚠️  Gmail/Drive Not Working? Set up OAuth:');
-    console.log(`   Visit: http://localhost:${PORT}/auth/google`);
+    console.log('⚠️  Gmail/Drive/Calendar Not Working? Fix it:');
+    console.log(`   1. Re-authenticate: http://localhost:${PORT}/auth/google`);
+    console.log(`   2. Then refresh tokens: http://localhost:${PORT}/api/auth/force-refresh-tokens`);
     console.log('');
   }
 });
