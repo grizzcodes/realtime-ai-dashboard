@@ -12,12 +12,135 @@ module.exports = function(app, io, integrationService, supabaseClient) {
     apiKey: process.env.ANTHROPIC_API_KEY
   });
 
-  // Known contacts mapping (you should move this to a database)
-  const KNOWN_CONTACTS = {
-    'leo': 'leo@dgenz.world', // Update with Leo's actual email
-    'andy': 'andy@dgenz.world',
-    'alec': 'alec@dgenz.world'
-  };
+  // Helper to lookup contacts from Supabase with priority
+  async function lookupContactEmail(name) {
+    if (!supabaseClient) {
+      console.log('⚠️ Supabase not configured, cannot lookup contacts');
+      return null;
+    }
+
+    const searchName = name.toLowerCase().trim();
+    console.log(`🔍 Looking up contact: "${searchName}"`);
+
+    try {
+      // Priority 1: Check People table (team members)
+      const { data: people, error: peopleError } = await supabaseClient
+        .from('people')
+        .select('name, email')
+        .or(`name.ilike.%${searchName}%,email.ilike.%${searchName}%`)
+        .limit(1);
+
+      if (!peopleError && people && people.length > 0) {
+        console.log(`✅ Found in People: ${people[0].name} -> ${people[0].email}`);
+        return {
+          email: people[0].email,
+          name: people[0].name,
+          type: 'team'
+        };
+      }
+
+      // Priority 2: Check Clients table
+      const { data: clients, error: clientsError } = await supabaseClient
+        .from('clients')
+        .select('name, email, company')
+        .or(`name.ilike.%${searchName}%,email.ilike.%${searchName}%,company.ilike.%${searchName}%`)
+        .limit(1);
+
+      if (!clientsError && clients && clients.length > 0) {
+        console.log(`✅ Found in Clients: ${clients[0].name} -> ${clients[0].email}`);
+        return {
+          email: clients[0].email,
+          name: clients[0].name,
+          company: clients[0].company,
+          type: 'client'
+        };
+      }
+
+      // Priority 3: Check Leads table
+      const { data: leads, error: leadsError } = await supabaseClient
+        .from('leads')
+        .select('name, email, company')
+        .or(`name.ilike.%${searchName}%,email.ilike.%${searchName}%,company.ilike.%${searchName}%`)
+        .limit(1);
+
+      if (!leadsError && leads && leads.length > 0) {
+        console.log(`✅ Found in Leads: ${leads[0].name} -> ${leads[0].email}`);
+        return {
+          email: leads[0].email,
+          name: leads[0].name,
+          company: leads[0].company,
+          type: 'lead'
+        };
+      }
+
+      console.log(`❌ Contact "${searchName}" not found in database`);
+      return null;
+
+    } catch (error) {
+      console.error('Error looking up contact:', error);
+      return null;
+    }
+  }
+
+  // Helper to extract and resolve all attendees from message
+  async function resolveAttendees(message) {
+    const attendees = [];
+    const emailRegex = /[\w.-]+@[\w.-]+\.\w+/g;
+    
+    // First, collect any explicit email addresses
+    const explicitEmails = message.match(emailRegex) || [];
+    explicitEmails.forEach(email => {
+      attendees.push({ email, type: 'explicit' });
+    });
+
+    // Common name patterns to look for
+    const namePatterns = [
+      /(?:with|invite|include|add)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/g,
+      /([A-Z][a-z]+)\s+and\s+(?:I|me)/gi,
+      /(?:I|me)\s+and\s+([A-Z][a-z]+)/gi,
+      /for\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+and/gi
+    ];
+
+    const foundNames = new Set();
+    
+    // Extract names from message
+    for (const pattern of namePatterns) {
+      const matches = [...message.matchAll(pattern)];
+      for (const match of matches) {
+        if (match[1] && !match[1].toLowerCase().includes('meeting')) {
+          foundNames.add(match[1].trim());
+        }
+      }
+    }
+
+    // Also check for standalone capitalized names
+    const words = message.split(/\s+/);
+    for (const word of words) {
+      // Check if it's a capitalized word (likely a name)
+      if (/^[A-Z][a-z]+$/.test(word) && word.length > 2) {
+        // Skip common words
+        const skipWords = ['Meeting', 'Call', 'Event', 'Calendar', 'Schedule', 'Tomorrow', 'Today'];
+        if (!skipWords.includes(word)) {
+          foundNames.add(word);
+        }
+      }
+    }
+
+    // Look up each name in the database
+    for (const name of foundNames) {
+      const contact = await lookupContactEmail(name);
+      if (contact) {
+        // Check if we already have this email
+        const exists = attendees.some(a => a.email === contact.email);
+        if (!exists) {
+          attendees.push(contact);
+          console.log(`📧 Added attendee: ${contact.name} (${contact.type}) - ${contact.email}`);
+        }
+      }
+    }
+
+    return attendees;
+  }
 
   // Helper to execute calendar actions
   async function executeCalendarAction(action, params) {
@@ -48,7 +171,7 @@ module.exports = function(app, io, integrationService, supabaseClient) {
             start: eventDate.start,
             end: eventDate.end,
             timezone: eventDate.timezone,
-            attendees
+            attendees: attendees.map(a => a.email || a)
           });
           
           // Create the calendar event
@@ -64,7 +187,7 @@ module.exports = function(app, io, integrationService, supabaseClient) {
               timeZone: eventDate.timezone
             },
             attendees: attendees && attendees.length > 0 ? 
-              attendees.map(email => ({ email })) : [],
+              attendees.map(a => ({ email: a.email || a })) : [],
             reminders: {
               useDefault: false,
               overrides: [
@@ -80,7 +203,8 @@ module.exports = function(app, io, integrationService, supabaseClient) {
             success: true,
             message: `Calendar event "${title || 'Meeting'}" created successfully`,
             eventId: result.data?.id,
-            htmlLink: result.data?.htmlLink
+            htmlLink: result.data?.htmlLink,
+            attendees: attendees
           };
           
         case 'list_events':
@@ -163,7 +287,7 @@ module.exports = function(app, io, integrationService, supabaseClient) {
   }
 
   // Helper to detect and extract action intents - ENHANCED
-  function detectActionIntent(message) {
+  async function detectActionIntent(message) {
     const lowerMessage = message.toLowerCase();
     
     // ENHANCED: Calendar actions - more trigger words
@@ -177,21 +301,8 @@ module.exports = function(app, io, integrationService, supabaseClient) {
         lowerMessage.includes('book') ||
         lowerMessage.includes('appointment')) {
       
-      // Extract email addresses
-      const emailRegex = /[\w.-]+@[\w.-]+\.\w+/g;
-      let emails = message.match(emailRegex) || [];
-      
-      // Extract names and map to emails
-      const attendeeNames = [];
-      for (const [name, email] of Object.entries(KNOWN_CONTACTS)) {
-        if (lowerMessage.includes(name)) {
-          attendeeNames.push(email);
-          console.log(`📋 Found attendee: ${name} -> ${email}`);
-        }
-      }
-      
-      // Combine found emails with mapped names
-      emails = [...new Set([...emails, ...attendeeNames])];
+      // Resolve attendees from database
+      const attendees = await resolveAttendees(message);
       
       // Enhanced time extraction - handle "12pm est" format
       const timeRegex = /(\d{1,2}):?(\d{2})?\s*(am|pm|AM|PM)\s*(est|edt|pst|pdt|cst|cdt|et|pt|ct)?/gi;
@@ -211,14 +322,14 @@ module.exports = function(app, io, integrationService, supabaseClient) {
       const today = lowerMessage.includes('today');
       const nextWeek = lowerMessage.includes('next week');
       
-      // Extract title - enhanced to handle various patterns
+      // Extract title
       let title = extractTitle(message);
       
       console.log('🎯 Calendar intent detected:', {
         time,
         date: tomorrow ? 'tomorrow' : (today ? 'today' : null),
         title,
-        attendees: emails,
+        attendees: attendees.map(a => `${a.name || a.email} (${a.type})`),
         timezone
       });
       
@@ -226,7 +337,7 @@ module.exports = function(app, io, integrationService, supabaseClient) {
         type: 'calendar',
         action: 'create_event',
         params: {
-          attendees: emails,
+          attendees: attendees,
           time: time,
           date: tomorrow ? 'tomorrow' : (today ? 'today' : nextWeek ? 'next week' : null),
           title: title,
@@ -277,20 +388,14 @@ module.exports = function(app, io, integrationService, supabaseClient) {
       });
 
       // Detect if this requires an action
-      const actionIntent = detectActionIntent(message);
+      const actionIntent = await detectActionIntent(message);
       
       // Build context including action capabilities
       let systemPrompt = `You are a helpful AI assistant for DGenz company. 
       You have access to the company calendar and can create events.
-      When users ask to schedule meetings or create calendar events, acknowledge that you're creating the event.
-      Always be specific about what actions you're taking.
-      
-      Known team members:
-      - Leo (leo@dgenz.world)
-      - Andy (andy@dgenz.world)
-      - Alec (alec@dgenz.world)
-      
-      When someone mentions a team member by name, use their email for calendar invites.`;
+      You also have access to a database of People (team members), Clients, and Leads.
+      When users ask to schedule meetings, you automatically look up attendees in the database.
+      Always be specific about what actions you're taking.`;
       
       // Get AI response
       let aiResponse = '';
@@ -307,10 +412,15 @@ module.exports = function(app, io, integrationService, supabaseClient) {
       }
       
       // Now get AI response with context about what was done
-      const actionContext = actionResult?.success ? 
-        `\n[System: Calendar event "${actionIntent?.params?.title}" was successfully created with attendees: ${actionIntent?.params?.attendees?.join(', ') || 'none'}]` : 
-        actionResult?.error ? 
-        `\n[System: Failed to create calendar event: ${actionResult.error}]` : '';
+      let actionContext = '';
+      if (actionResult?.success) {
+        const attendeeList = actionResult.attendees?.map(a => 
+          `${a.name || a.email} (${a.type || 'email'})`
+        ).join(', ') || 'none';
+        actionContext = `\n[System: Calendar event "${actionIntent?.params?.title}" was successfully created with attendees: ${attendeeList}]`;
+      } else if (actionResult?.error) {
+        actionContext = `\n[System: Failed to create calendar event: ${actionResult.error}]`;
+      }
       
       if (model === 'claude') {
         const response = await anthropic.messages.create({
@@ -338,6 +448,11 @@ module.exports = function(app, io, integrationService, supabaseClient) {
         aiResponse += `\n\n✅ **Event created successfully!**`;
         if (actionResult.htmlLink) {
           aiResponse += `\n📅 [View in Google Calendar](${actionResult.htmlLink})`;
+        }
+        if (actionResult.attendees && actionResult.attendees.length > 0) {
+          aiResponse += `\n👥 Attendees: ${actionResult.attendees.map(a => 
+            `${a.name || a.email}`
+          ).join(', ')}`;
         }
       } else if (actionResult?.error) {
         aiResponse += `\n\n⚠️ I tried to create the calendar event but encountered an error: ${actionResult.error}`;
@@ -418,9 +533,9 @@ module.exports = function(app, io, integrationService, supabaseClient) {
     }
   });
 
-  console.log('🤖 AI routes loaded with ENHANCED calendar action execution');
-  console.log('   - Detects: call, setup, meeting, schedule, book, appointment');
-  console.log('   - Maps names to emails: Leo, Andy, Alec');
+  console.log('🤖 AI routes loaded with DATABASE-POWERED calendar integration');
+  console.log('   - Looks up contacts in priority: People → Clients → Leads');
+  console.log('   - Automatically resolves names to emails from Supabase');
   console.log('   - Handles timezones: EST, PST, CST');
-  console.log('   - Better title extraction for "named/called/titled" patterns');
+  console.log('   - Smart title extraction');
 };
