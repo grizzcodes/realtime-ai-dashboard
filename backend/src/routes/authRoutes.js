@@ -31,6 +31,7 @@ module.exports = function(app) {
       // Calendar - FULL access for creating events
       'https://www.googleapis.com/auth/calendar',
       'https://www.googleapis.com/auth/calendar.events',
+      'https://www.googleapis.com/auth/calendar.readonly',
       
       // Drive - FULL access for reading files
       'https://www.googleapis.com/auth/drive',
@@ -41,16 +42,42 @@ module.exports = function(app) {
     const url = oauth2Client.generateAuthUrl({
       access_type: 'offline',
       scope: scopes,
-      prompt: 'consent' // Force consent to ensure all scopes are granted
+      prompt: 'consent', // Force consent to ensure all scopes are granted
+      include_granted_scopes: true // Include previously granted scopes
     });
 
     console.log('🔐 Requesting OAuth scopes:', scopes.length, 'permissions');
+    console.log('📅 CALENDAR SCOPES INCLUDED:', scopes.filter(s => s.includes('calendar')));
+    res.redirect(url);
+  });
+
+  // Force re-authentication with calendar fix
+  app.get('/auth/google/calendar-fix', (req, res) => {
+    console.log('🔧 FORCING CALENDAR RE-AUTH WITH EXPLICIT PERMISSIONS');
+    
+    // Only calendar-specific scopes for focused permission
+    const calendarScopes = [
+      'https://www.googleapis.com/auth/calendar',
+      'https://www.googleapis.com/auth/calendar.events',
+      'https://www.googleapis.com/auth/calendar.readonly',
+      'https://www.googleapis.com/auth/userinfo.email'
+    ];
+
+    const url = oauth2Client.generateAuthUrl({
+      access_type: 'offline',
+      scope: calendarScopes.join(' '),
+      prompt: 'consent', // FORCE new consent
+      include_granted_scopes: false, // Don't include old scopes
+      state: 'calendar_fix' // Mark this as calendar fix flow
+    });
+
+    console.log('🔐 Requesting CALENDAR-SPECIFIC scopes:', calendarScopes);
     res.redirect(url);
   });
 
   // Google OAuth callback
   app.get('/auth/google/callback', async (req, res) => {
-    const { code } = req.query;
+    const { code, state } = req.query;
     
     if (!code) {
       return res.status(400).send('Authorization code missing');
@@ -59,6 +86,26 @@ module.exports = function(app) {
     try {
       const { tokens } = await oauth2Client.getToken(code);
       oauth2Client.setCredentials(tokens);
+
+      // Decode the access token to see what scopes were actually granted
+      try {
+        const tokenInfo = await oauth2Client.getTokenInfo(tokens.access_token);
+        console.log('✅ GRANTED SCOPES:', tokenInfo.scopes);
+        
+        // Check if calendar scope is included
+        const hasCalendarScope = tokenInfo.scopes.some(scope => 
+          scope.includes('calendar')
+        );
+        
+        if (!hasCalendarScope) {
+          console.error('❌ CALENDAR SCOPE NOT GRANTED!');
+          console.log('Available scopes:', tokenInfo.scopes);
+        } else {
+          console.log('✅ CALENDAR SCOPE CONFIRMED!');
+        }
+      } catch (tokenError) {
+        console.error('Could not decode token:', tokenError);
+      }
 
       // Get user profile
       const oauth2 = google.oauth2({ version: 'v2', auth: oauth2Client });
@@ -77,9 +124,14 @@ module.exports = function(app) {
         process.env.GOOGLE_REFRESH_TOKEN = tokens.refresh_token;
         console.log('✅ Google OAuth successful! Refresh token saved.');
         console.log(`👤 Logged in as: ${userProfile.email}`);
-        console.log('📅 Calendar access: GRANTED');
-        console.log('📁 Drive access: GRANTED');
-        console.log('📧 Gmail access: GRANTED');
+        
+        // Also store access token temporarily for immediate use
+        process.env.GOOGLE_ACCESS_TOKEN = tokens.access_token;
+        console.log('✅ Access token also saved for immediate use');
+      } else if (tokens.access_token) {
+        // Even without refresh token, save access token
+        process.env.GOOGLE_ACCESS_TOKEN = tokens.access_token;
+        console.log('⚠️ No refresh token received, but access token saved');
       }
 
       // Update all services with new OAuth client
@@ -95,11 +147,27 @@ module.exports = function(app) {
         if (CalendarService) {
           const calendarService = new CalendarService();
           calendarService.oauth2Client = oauth2Client;
+          
+          // Store globally for other routes
+          global.calendarServiceAuth = oauth2Client;
           console.log('✅ Calendar service updated with new auth');
         }
+        
+        // Test calendar access immediately
+        try {
+          const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
+          const calendarList = await calendar.calendarList.list({ maxResults: 1 });
+          console.log('✅ CALENDAR ACCESS VERIFIED!');
+        } catch (calError) {
+          console.error('❌ CALENDAR ACCESS TEST FAILED:', calError.message);
+        }
+        
       } catch (err) {
         console.log('⚠️ Some services not updated:', err.message);
       }
+
+      // Check if this was a calendar fix flow
+      const isCalendarFix = state === 'calendar_fix';
 
       // Success page with token info
       res.send(`
@@ -151,7 +219,7 @@ module.exports = function(app) {
               }
               .button {
                 display: inline-block;
-                margin-top: 2rem;
+                margin: 1rem 0.5rem;
                 padding: 12px 24px;
                 background: white;
                 color: #764ba2;
@@ -163,12 +231,23 @@ module.exports = function(app) {
               .button:hover {
                 transform: translateY(-2px);
               }
+              .button.test {
+                background: #10b981;
+                color: white;
+              }
               .warning {
                 background: rgba(255, 193, 7, 0.2);
                 padding: 1rem;
                 border-radius: 8px;
                 margin-top: 1rem;
                 border: 1px solid rgba(255, 193, 7, 0.4);
+              }
+              .success {
+                background: rgba(16, 185, 129, 0.2);
+                padding: 1rem;
+                border-radius: 8px;
+                margin-top: 1rem;
+                border: 1px solid rgba(16, 185, 129, 0.4);
               }
             </style>
           </head>
@@ -187,20 +266,27 @@ module.exports = function(app) {
               </div>
               
               ${tokens.refresh_token ? 
-                '<p style="color: #4ade80;">✅ Refresh token saved - You won\'t need to login again!</p>' :
+                '<div class="success">✅ Refresh token saved - You won\'t need to login again!</div>' :
                 '<div class="warning">⚠️ No refresh token received. You may need to re-authenticate later.</div>'
               }
               
-              <a href="http://localhost:3000" class="button">Go to Dashboard</a>
+              ${isCalendarFix ? 
+                '<div class="success">📅 Calendar permissions specifically requested!</div>' : ''
+              }
+              
+              <div style="margin-top: 2rem;">
+                <a href="http://localhost:3001/api/calendar/fix-and-test" class="button test">Test Calendar Now</a>
+                <a href="http://localhost:3000" class="button">Go to Dashboard</a>
+              </div>
+              
+              <p style="margin-top: 1rem; font-size: 0.9rem; opacity: 0.8;">
+                Click "Test Calendar Now" to verify calendar access is working
+              </p>
             </div>
             <script>
               // Store email in localStorage for the frontend
               localStorage.setItem('userEmail', '${userProfile.email}');
               localStorage.setItem('authComplete', 'true');
-              // Auto-redirect after 3 seconds
-              setTimeout(() => {
-                window.location.href = 'http://localhost:3000';
-              }, 3000);
             </script>
           </body>
         </html>
@@ -303,6 +389,7 @@ module.exports = function(app) {
       
       // Clear tokens (in production, also revoke tokens with Google)
       delete process.env.GOOGLE_REFRESH_TOKEN;
+      delete process.env.GOOGLE_ACCESS_TOKEN;
       
       // Clear OAuth client credentials
       oauth2Client.setCredentials({});
@@ -330,7 +417,8 @@ module.exports = function(app) {
       success: true,
       authenticated: isAuthenticated,
       hasProfile: !!userProfile,
-      hasToken: !!process.env.GOOGLE_REFRESH_TOKEN
+      hasToken: !!process.env.GOOGLE_REFRESH_TOKEN,
+      hasAccessToken: !!process.env.GOOGLE_ACCESS_TOKEN
     });
   });
 
@@ -340,6 +428,7 @@ module.exports = function(app) {
     
     // Clear existing tokens
     delete process.env.GOOGLE_REFRESH_TOKEN;
+    delete process.env.GOOGLE_ACCESS_TOKEN;
     userProfile = null;
     oauth2Client.setCredentials({});
     
@@ -349,5 +438,6 @@ module.exports = function(app) {
 
   console.log('🔐 Auth routes configured with FULL permissions');
   console.log('   Visit http://localhost:3001/auth/google to authenticate');
+  console.log('   Or http://localhost:3001/auth/google/calendar-fix for calendar-specific auth');
   console.log('   Or http://localhost:3001/api/auth/reauth to force new authentication');
 };
