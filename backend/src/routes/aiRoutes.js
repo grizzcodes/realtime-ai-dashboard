@@ -95,7 +95,7 @@ module.exports = function(app, io, integrationService, supabaseClient) {
 
     // Common name patterns to look for
     const namePatterns = [
-      /(?:with|invite|include|add)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/g,
+      /(?:with|invite|include|add|to)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/g,
       /([A-Z][a-z]+)\s+and\s+(?:I|me)/gi,
       /(?:I|me)\s+and\s+([A-Z][a-z]+)/gi,
       /for\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+and/gi
@@ -113,13 +113,21 @@ module.exports = function(app, io, integrationService, supabaseClient) {
       }
     }
 
-    // Also check for standalone capitalized names
+    // Also check for standalone capitalized names (but not after "called" or "named")
     const words = message.split(/\s+/);
-    for (const word of words) {
+    for (let i = 0; i < words.length; i++) {
+      const word = words[i];
+      const prevWord = i > 0 ? words[i-1].toLowerCase() : '';
+      
+      // Skip if previous word is "called" or "named" (that's the title)
+      if (prevWord === 'called' || prevWord === 'named' || prevWord === 'titled') {
+        continue;
+      }
+      
       // Check if it's a capitalized word (likely a name)
       if (/^[A-Z][a-z]+$/.test(word) && word.length > 2) {
         // Skip common words
-        const skipWords = ['Meeting', 'Call', 'Event', 'Calendar', 'Schedule', 'Tomorrow', 'Today'];
+        const skipWords = ['Meeting', 'Call', 'Event', 'Calendar', 'Schedule', 'Tomorrow', 'Today', 'TEST', 'AI'];
         if (!skipWords.includes(word)) {
           foundNames.add(word);
         }
@@ -197,7 +205,16 @@ module.exports = function(app, io, integrationService, supabaseClient) {
             }
           });
           
-          console.log('✅ Calendar event created:', result);
+          // Check if result is actually successful
+          if (!result.success) {
+            console.error('❌ Calendar creation failed:', result.error);
+            return {
+              success: false,
+              error: result.error || 'Failed to create calendar event'
+            };
+          }
+          
+          console.log('✅ Calendar event created successfully:', result.data?.id);
           
           return {
             success: true,
@@ -301,6 +318,9 @@ module.exports = function(app, io, integrationService, supabaseClient) {
         lowerMessage.includes('book') ||
         lowerMessage.includes('appointment')) {
       
+      // Extract title FIRST before looking for attendees
+      let title = extractTitle(message);
+      
       // Resolve attendees from database
       const attendees = await resolveAttendees(message);
       
@@ -321,9 +341,6 @@ module.exports = function(app, io, integrationService, supabaseClient) {
       const tomorrow = lowerMessage.includes('tomorrow');
       const today = lowerMessage.includes('today');
       const nextWeek = lowerMessage.includes('next week');
-      
-      // Extract title
-      let title = extractTitle(message);
       
       console.log('🎯 Calendar intent detected:', {
         time,
@@ -349,27 +366,31 @@ module.exports = function(app, io, integrationService, supabaseClient) {
     return null;
   }
 
-  // Extract meeting title from message - ENHANCED
+  // Extract meeting title from message - FIXED
   function extractTitle(message) {
-    // Try to extract text after "named" or "called" or "titled"
-    const namedMatch = message.match(/(?:named|called|titled)\s+['"]?([^'"]+?)['"]?(?:\s+at|\s+on|\s+with|\s+for|$)/i);
-    if (namedMatch) return namedMatch[1].trim();
+    // First, try to extract text after "called", "named", or "titled"
+    // Updated regex to be more precise and capture everything after these keywords
+    const calledMatch = message.match(/(?:called|named|titled)\s+([^at]+?)(?:\s+at\s+|\s*$)/i);
+    if (calledMatch) {
+      const title = calledMatch[1].trim();
+      // Remove "for tomorrow" or similar date phrases from the title
+      const cleanTitle = title.replace(/\s+for\s+(tomorrow|today|next\s+week)$/i, '').trim();
+      console.log(`📝 Extracted title from "called/named": "${cleanTitle}"`);
+      return cleanTitle;
+    }
     
     // Try to extract text between quotes
     const quotedMatch = message.match(/["']([^"']+)["']/);
-    if (quotedMatch) return quotedMatch[1];
-    
-    // Try to extract after "about" or "for" or "regarding"
-    const aboutMatch = message.match(/(?:about|for|regarding)\s+(.+?)(?:\s+(?:at|on|with|tomorrow|today)|$)/i);
-    if (aboutMatch && !aboutMatch[1].includes('and')) {
-      return aboutMatch[1].trim();
+    if (quotedMatch) {
+      console.log(`📝 Extracted title from quotes: "${quotedMatch[1]}"`);
+      return quotedMatch[1];
     }
     
-    // If message contains specific project/topic keywords
-    if (message.toLowerCase().includes('cgi')) {
-      // Extract the full phrase containing CGI
-      const cgiMatch = message.match(/\b(cgi[^,.\s]*(?:\s+[^,.\s]+)?)\b/i);
-      if (cgiMatch) return cgiMatch[1].trim();
+    // Try to extract after "about" or "regarding"
+    const aboutMatch = message.match(/(?:about|regarding)\s+(.+?)(?:\s+(?:at|on|with|tomorrow|today)|$)/i);
+    if (aboutMatch && !aboutMatch[1].includes('and')) {
+      console.log(`📝 Extracted title from "about/regarding": "${aboutMatch[1].trim()}"`);
+      return aboutMatch[1].trim();
     }
     
     // Default title
@@ -443,12 +464,10 @@ module.exports = function(app, io, integrationService, supabaseClient) {
         aiResponse = completion.choices[0].message.content;
       }
       
-      // Append action result to response
-      if (actionResult?.success) {
+      // Append action result to response - ONLY if actually successful
+      if (actionResult?.success && actionResult?.htmlLink) {
         aiResponse += `\n\n✅ **Event created successfully!**`;
-        if (actionResult.htmlLink) {
-          aiResponse += `\n📅 [View in Google Calendar](${actionResult.htmlLink})`;
-        }
+        aiResponse += `\n📅 [View in Google Calendar](${actionResult.htmlLink})`;
         if (actionResult.attendees && actionResult.attendees.length > 0) {
           aiResponse += `\n👥 Attendees: ${actionResult.attendees.map(a => 
             `${a.name || a.email}`
@@ -456,7 +475,14 @@ module.exports = function(app, io, integrationService, supabaseClient) {
         }
       } else if (actionResult?.error) {
         aiResponse += `\n\n⚠️ I tried to create the calendar event but encountered an error: ${actionResult.error}`;
-        aiResponse += `\n\nPlease make sure calendar permissions are properly configured.`;
+        
+        // Check for specific auth errors
+        if (actionResult.error.includes('authenticate') || actionResult.error.includes('invalid_grant')) {
+          aiResponse += `\n\n🔧 **To fix this:**`;
+          aiResponse += `\n1. Visit: http://localhost:3001/api/auth/reset-and-fix`;
+          aiResponse += `\n2. Re-authenticate with Google`;
+          aiResponse += `\n3. Try creating the event again`;
+        }
       }
       
       // Send response
@@ -537,5 +563,5 @@ module.exports = function(app, io, integrationService, supabaseClient) {
   console.log('   - Looks up contacts in priority: People → Clients → Leads');
   console.log('   - Automatically resolves names to emails from Supabase');
   console.log('   - Handles timezones: EST, PST, CST');
-  console.log('   - Smart title extraction');
+  console.log('   - Smart title extraction with improved parsing');
 };
