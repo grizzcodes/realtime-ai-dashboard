@@ -17,6 +17,17 @@ module.exports = function(app, io, integrationService, supabaseClient) {
     console.log('📅 Executing calendar action:', action, params);
     
     try {
+      // Use the fixed calendar service if available
+      const calendarService = global.calendarServiceFixed || integrationService.calendarService;
+      
+      if (!calendarService) {
+        console.error('❌ No calendar service available');
+        return {
+          success: false,
+          error: 'Calendar service not initialized'
+        };
+      }
+      
       switch(action) {
         case 'create_event':
           // Parse the event details
@@ -25,17 +36,24 @@ module.exports = function(app, io, integrationService, supabaseClient) {
           // Convert natural language date/time to proper format
           const eventDate = parseEventDateTime(date, time);
           
+          console.log('📅 Creating event with details:', {
+            title: title || 'Meeting',
+            start: eventDate.start,
+            end: eventDate.end,
+            attendees
+          });
+          
           // Create the calendar event
-          const result = await integrationService.calendarService.createEvent({
+          const result = await calendarService.createEvent({
             summary: title || 'Meeting',
             description: description || '',
             start: {
               dateTime: eventDate.start,
-              timeZone: 'America/Los_Angeles'
+              timeZone: 'America/New_York' // Using EST as requested
             },
             end: {
               dateTime: eventDate.end,
-              timeZone: 'America/Los_Angeles'
+              timeZone: 'America/New_York'
             },
             attendees: attendees ? attendees.map(email => ({ email })) : [],
             reminders: {
@@ -47,15 +65,17 @@ module.exports = function(app, io, integrationService, supabaseClient) {
             }
           });
           
+          console.log('✅ Calendar event created:', result);
+          
           return {
             success: true,
-            message: `Calendar event created successfully`,
+            message: `Calendar event "${title || 'Meeting'}" created successfully`,
             eventId: result.data?.id,
             htmlLink: result.data?.htmlLink
           };
           
         case 'list_events':
-          const events = await integrationService.calendarService.getUpcomingEvents(params.days || 7);
+          const events = await calendarService.getUpcomingEvents(params.days || 7);
           return {
             success: true,
             events: events.data || []
@@ -68,7 +88,7 @@ module.exports = function(app, io, integrationService, supabaseClient) {
           };
       }
     } catch (error) {
-      console.error('Calendar action failed:', error);
+      console.error('❌ Calendar action failed:', error);
       return {
         success: false,
         error: error.message
@@ -76,7 +96,7 @@ module.exports = function(app, io, integrationService, supabaseClient) {
     }
   }
 
-  // Helper to parse natural language dates
+  // Helper to parse natural language dates with timezone support
   function parseEventDateTime(dateStr, timeStr) {
     const now = new Date();
     let eventDate = new Date();
@@ -91,9 +111,10 @@ module.exports = function(app, io, integrationService, supabaseClient) {
       eventDate = new Date(dateStr);
     }
     
-    // Parse time (e.g., "10am", "10:00 AM", "3:30pm")
+    // Parse time (e.g., "12pm", "10am", "10:00 AM", "3:30pm")
     if (timeStr) {
-      const timeMatch = timeStr.match(/(\d{1,2}):?(\d{2})?\s*(am|pm)?/i);
+      // Enhanced regex to catch more time formats
+      const timeMatch = timeStr.match(/(\d{1,2}):?(\d{2})?\s*(am|pm|AM|PM)?/i);
       if (timeMatch) {
         let hours = parseInt(timeMatch[1]);
         const minutes = parseInt(timeMatch[2] || '0');
@@ -119,34 +140,66 @@ module.exports = function(app, io, integrationService, supabaseClient) {
     };
   }
 
-  // Helper to detect and extract action intents
+  // Helper to detect and extract action intents - ENHANCED
   function detectActionIntent(message) {
     const lowerMessage = message.toLowerCase();
     
-    // Calendar actions
-    if (lowerMessage.includes('calendar') || lowerMessage.includes('meeting') || 
-        lowerMessage.includes('schedule') || lowerMessage.includes('invite')) {
+    // ENHANCED: Calendar actions - more trigger words
+    if (lowerMessage.includes('calendar') || 
+        lowerMessage.includes('meeting') || 
+        lowerMessage.includes('schedule') || 
+        lowerMessage.includes('invite') ||
+        lowerMessage.includes('call') ||
+        lowerMessage.includes('setup') ||
+        lowerMessage.includes('book') ||
+        lowerMessage.includes('appointment')) {
       
       // Extract email addresses
       const emailRegex = /[\w.-]+@[\w.-]+\.\w+/g;
       const emails = message.match(emailRegex) || [];
       
-      // Extract time
-      const timeRegex = /(\d{1,2}):?(\d{2})?\s*(am|pm)|(\d{1,2})\s*(am|pm)/gi;
-      const timeMatch = message.match(timeRegex);
+      // Enhanced time extraction - handle "12pm est" format
+      const timeRegex = /(\d{1,2}):?(\d{2})?\s*(am|pm|AM|PM)/gi;
+      const timeMatches = message.match(timeRegex);
+      const time = timeMatches ? timeMatches[0] : null;
       
       // Extract date keywords
       const tomorrow = lowerMessage.includes('tomorrow');
       const today = lowerMessage.includes('today');
+      const nextWeek = lowerMessage.includes('next week');
+      
+      // Extract title - enhanced to handle "called XXX" pattern
+      let title = extractTitle(message);
+      
+      // Special case: if message contains "called", use what comes after it
+      const calledMatch = message.match(/called\s+(.+?)(?:\s+at|\s+on|\s+with|$)/i);
+      if (calledMatch) {
+        title = calledMatch[1].trim();
+      }
+      
+      // Extract attendee names (for now, just capture them)
+      const attendees = [];
+      if (lowerMessage.includes('leo')) {
+        // You might want to map names to emails here
+        // For now, we'll just note the name
+        console.log('📋 Attendee mentioned: Leo');
+      }
+      
+      console.log('🎯 Calendar intent detected:', {
+        time,
+        date: tomorrow ? 'tomorrow' : (today ? 'today' : null),
+        title,
+        attendees: emails
+      });
       
       return {
         type: 'calendar',
         action: 'create_event',
         params: {
           attendees: emails,
-          time: timeMatch ? timeMatch[0] : null,
-          date: tomorrow ? 'tomorrow' : (today ? 'today' : null),
-          title: extractTitle(message)
+          time: time,
+          date: tomorrow ? 'tomorrow' : (today ? 'today' : nextWeek ? 'next week' : null),
+          title: title
         }
       };
     }
@@ -154,15 +207,23 @@ module.exports = function(app, io, integrationService, supabaseClient) {
     return null;
   }
 
-  // Extract meeting title from message
+  // Extract meeting title from message - ENHANCED
   function extractTitle(message) {
+    // Try to extract text after "called"
+    const calledMatch = message.match(/called\s+['"]?([^'"]+?)['"]?(?:\s+at|\s+on|\s+with|$)/i);
+    if (calledMatch) return calledMatch[1].trim();
+    
     // Try to extract text between quotes
     const quotedMatch = message.match(/["']([^"']+)["']/);
     if (quotedMatch) return quotedMatch[1];
     
-    // Try to extract after "about" or "for"
+    // Try to extract after "about" or "for" or "regarding"
     const aboutMatch = message.match(/(?:about|for|regarding)\s+(.+?)(?:\s+(?:at|on|with)|$)/i);
-    if (aboutMatch) return aboutMatch[1];
+    if (aboutMatch) return aboutMatch[1].trim();
+    
+    // If message contains specific project/topic keywords
+    if (message.toLowerCase().includes('cgi')) return 'CGI Meeting';
+    if (message.toLowerCase().includes('test')) return 'Test Meeting';
     
     // Default title
     return 'Meeting';
@@ -174,7 +235,7 @@ module.exports = function(app, io, integrationService, supabaseClient) {
       const { message, model = 'gpt-4', sessionId } = req.body;
       
       console.log('🤖 AI chat request:', { 
-        message: message.substring(0, 100),
+        message,
         model,
         sessionId 
       });
@@ -192,11 +253,27 @@ module.exports = function(app, io, integrationService, supabaseClient) {
       let aiResponse = '';
       let actionResult = null;
       
+      // Execute the action FIRST if detected
+      if (actionIntent) {
+        console.log('🎯 Action detected:', actionIntent);
+        
+        if (actionIntent.type === 'calendar') {
+          actionResult = await executeCalendarAction(actionIntent.action, actionIntent.params);
+          console.log('📅 Action result:', actionResult);
+        }
+      }
+      
+      // Now get AI response with context about what was done
+      const actionContext = actionResult?.success ? 
+        `\n[System: Calendar event "${actionIntent?.params?.title}" was successfully created]` : 
+        actionResult?.error ? 
+        `\n[System: Failed to create calendar event: ${actionResult.error}]` : '';
+      
       if (model === 'claude') {
         const response = await anthropic.messages.create({
           model: 'claude-3-sonnet-20241022',
           max_tokens: 1000,
-          system: systemPrompt,
+          system: systemPrompt + actionContext,
           messages: [{ role: 'user', content: message }]
         });
         aiResponse = response.content[0].text;
@@ -204,7 +281,7 @@ module.exports = function(app, io, integrationService, supabaseClient) {
         const completion = await openai.chat.completions.create({
           model: model === 'gpt-4' ? 'gpt-4' : 'gpt-3.5-turbo',
           messages: [
-            { role: 'system', content: systemPrompt },
+            { role: 'system', content: systemPrompt + actionContext },
             { role: 'user', content: message }
           ],
           temperature: 0.7,
@@ -213,23 +290,15 @@ module.exports = function(app, io, integrationService, supabaseClient) {
         aiResponse = completion.choices[0].message.content;
       }
       
-      // Execute the action if detected
-      if (actionIntent) {
-        console.log('🎯 Action detected:', actionIntent);
-        
-        if (actionIntent.type === 'calendar') {
-          actionResult = await executeCalendarAction(actionIntent.action, actionIntent.params);
-          
-          // Append action result to response
-          if (actionResult.success) {
-            aiResponse += `\n\n✅ Action completed: ${actionResult.message}`;
-            if (actionResult.htmlLink) {
-              aiResponse += `\n📅 View event: ${actionResult.htmlLink}`;
-            }
-          } else {
-            aiResponse += `\n\n⚠️ I tried to create the calendar event but encountered an error: ${actionResult.error}`;
-          }
+      // Append action result to response
+      if (actionResult?.success) {
+        aiResponse += `\n\n✅ **Event created successfully!**`;
+        if (actionResult.htmlLink) {
+          aiResponse += `\n📅 [View in Google Calendar](${actionResult.htmlLink})`;
         }
+      } else if (actionResult?.error) {
+        aiResponse += `\n\n⚠️ I tried to create the calendar event but encountered an error: ${actionResult.error}`;
+        aiResponse += `\n\nPlease make sure calendar permissions are properly configured.`;
       }
       
       // Send response
@@ -264,7 +333,8 @@ module.exports = function(app, io, integrationService, supabaseClient) {
     try {
       const { days = 7 } = req.query;
       
-      const result = await integrationService.calendarService.getUpcomingEvents(parseInt(days));
+      const calendarService = global.calendarServiceFixed || integrationService.calendarService;
+      const result = await calendarService.getUpcomingEvents(parseInt(days));
       
       res.json({
         success: true,
@@ -305,5 +375,8 @@ module.exports = function(app, io, integrationService, supabaseClient) {
     }
   });
 
-  console.log('🤖 AI routes loaded with calendar action execution');
+  console.log('🤖 AI routes loaded with ENHANCED calendar action execution');
+  console.log('   - Detects: call, setup, meeting, schedule, book, appointment');
+  console.log('   - Handles: "called XXX" pattern for event titles');
+  console.log('   - Uses fixed calendar service when available');
 };
