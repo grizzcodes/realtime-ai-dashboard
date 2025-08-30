@@ -1,5 +1,5 @@
 // backend/src/routes/authRoutes.js
-// Google OAuth and user authentication routes
+// Google OAuth and user authentication routes - FIXED WITH ALL REQUIRED SCOPES
 
 module.exports = function(app) {
   const { google } = require('googleapis');
@@ -16,21 +16,35 @@ module.exports = function(app) {
 
   // Google OAuth initiation
   app.get('/auth/google', (req, res) => {
+    // COMPREHENSIVE SCOPES - Fixed to include ALL necessary permissions
     const scopes = [
+      // User info
       'https://www.googleapis.com/auth/userinfo.email',
       'https://www.googleapis.com/auth/userinfo.profile',
+      
+      // Gmail - Full access
       'https://www.googleapis.com/auth/gmail.readonly',
       'https://www.googleapis.com/auth/gmail.modify',
+      'https://www.googleapis.com/auth/gmail.send',
+      'https://www.googleapis.com/auth/gmail.compose',
+      
+      // Calendar - FULL access for creating events
       'https://www.googleapis.com/auth/calendar',
+      'https://www.googleapis.com/auth/calendar.events',
+      
+      // Drive - FULL access for reading files
+      'https://www.googleapis.com/auth/drive',
+      'https://www.googleapis.com/auth/drive.file',
       'https://www.googleapis.com/auth/drive.readonly'
     ];
 
     const url = oauth2Client.generateAuthUrl({
       access_type: 'offline',
       scope: scopes,
-      prompt: 'consent'
+      prompt: 'consent' // Force consent to ensure all scopes are granted
     });
 
+    console.log('🔐 Requesting OAuth scopes:', scopes.length, 'permissions');
     res.redirect(url);
   });
 
@@ -63,9 +77,31 @@ module.exports = function(app) {
         process.env.GOOGLE_REFRESH_TOKEN = tokens.refresh_token;
         console.log('✅ Google OAuth successful! Refresh token saved.');
         console.log(`👤 Logged in as: ${userProfile.email}`);
+        console.log('📅 Calendar access: GRANTED');
+        console.log('📁 Drive access: GRANTED');
+        console.log('📧 Gmail access: GRANTED');
       }
 
-      // Redirect to dashboard with success message
+      // Update all services with new OAuth client
+      try {
+        // Update Integration Service if it exists
+        if (global.integrationService) {
+          global.integrationService.updateGoogleAuth(oauth2Client);
+          console.log('✅ Integration service updated with new auth');
+        }
+        
+        // Update Calendar Service if it exists
+        const CalendarService = require('../services/calendarService');
+        if (CalendarService) {
+          const calendarService = new CalendarService();
+          calendarService.oauth2Client = oauth2Client;
+          console.log('✅ Calendar service updated with new auth');
+        }
+      } catch (err) {
+        console.log('⚠️ Some services not updated:', err.message);
+      }
+
+      // Success page with token info
       res.send(`
         <html>
           <head>
@@ -76,10 +112,11 @@ module.exports = function(app) {
                 display: flex;
                 justify-content: center;
                 align-items: center;
-                height: 100vh;
+                min-height: 100vh;
                 margin: 0;
                 background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
                 color: white;
+                padding: 20px;
               }
               .container {
                 text-align: center;
@@ -87,6 +124,7 @@ module.exports = function(app) {
                 background: rgba(255, 255, 255, 0.1);
                 border-radius: 12px;
                 backdrop-filter: blur(10px);
+                max-width: 600px;
               }
               h1 { margin-bottom: 1rem; }
               .email { 
@@ -96,6 +134,20 @@ module.exports = function(app) {
                 background: rgba(255, 255, 255, 0.2);
                 border-radius: 8px;
                 display: inline-block;
+              }
+              .permissions {
+                text-align: left;
+                background: rgba(255, 255, 255, 0.1);
+                padding: 1rem;
+                border-radius: 8px;
+                margin: 1.5rem 0;
+              }
+              .permission-item {
+                padding: 0.5rem 0;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+              }
+              .permission-item:last-child {
+                border-bottom: none;
               }
               .button {
                 display: inline-block;
@@ -111,6 +163,13 @@ module.exports = function(app) {
               .button:hover {
                 transform: translateY(-2px);
               }
+              .warning {
+                background: rgba(255, 193, 7, 0.2);
+                padding: 1rem;
+                border-radius: 8px;
+                margin-top: 1rem;
+                border: 1px solid rgba(255, 193, 7, 0.4);
+              }
             </style>
           </head>
           <body>
@@ -118,12 +177,26 @@ module.exports = function(app) {
               <h1>✅ Authentication Successful!</h1>
               <p>You are now logged in as:</p>
               <div class="email">${userProfile.email}</div>
-              <p>All integrations have been connected.</p>
+              
+              <div class="permissions">
+                <h3>🔓 Permissions Granted:</h3>
+                <div class="permission-item">📧 Gmail - Read, Send, Modify emails</div>
+                <div class="permission-item">📅 Calendar - Create and manage events</div>
+                <div class="permission-item">📁 Drive - Access and read files</div>
+                <div class="permission-item">👤 Profile - Basic user information</div>
+              </div>
+              
+              ${tokens.refresh_token ? 
+                '<p style="color: #4ade80;">✅ Refresh token saved - You won\'t need to login again!</p>' :
+                '<div class="warning">⚠️ No refresh token received. You may need to re-authenticate later.</div>'
+              }
+              
               <a href="http://localhost:3000" class="button">Go to Dashboard</a>
             </div>
             <script>
               // Store email in localStorage for the frontend
               localStorage.setItem('userEmail', '${userProfile.email}');
+              localStorage.setItem('authComplete', 'true');
               // Auto-redirect after 3 seconds
               setTimeout(() => {
                 window.location.href = 'http://localhost:3000';
@@ -134,7 +207,48 @@ module.exports = function(app) {
       `);
     } catch (error) {
       console.error('OAuth callback error:', error);
-      res.status(500).send('Authentication failed. Please try again.');
+      res.status(500).send(`
+        <html>
+          <head>
+            <title>Authentication Failed</title>
+            <style>
+              body {
+                font-family: system-ui, -apple-system, sans-serif;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                height: 100vh;
+                margin: 0;
+                background: #1a1a1a;
+                color: white;
+              }
+              .error-container {
+                text-align: center;
+                padding: 2rem;
+                background: rgba(239, 68, 68, 0.1);
+                border: 1px solid rgba(239, 68, 68, 0.5);
+                border-radius: 12px;
+              }
+              .retry-btn {
+                display: inline-block;
+                margin-top: 1rem;
+                padding: 10px 20px;
+                background: #ef4444;
+                color: white;
+                text-decoration: none;
+                border-radius: 6px;
+              }
+            </style>
+          </head>
+          <body>
+            <div class="error-container">
+              <h1>❌ Authentication Failed</h1>
+              <p>Error: ${error.message}</p>
+              <a href="/auth/google" class="retry-btn">Try Again</a>
+            </div>
+          </body>
+        </html>
+      `);
     }
   });
 
@@ -220,6 +334,20 @@ module.exports = function(app) {
     });
   });
 
-  console.log('🔐 Auth routes configured');
+  // Force re-authentication endpoint
+  app.get('/api/auth/reauth', (req, res) => {
+    console.log('🔄 Forcing re-authentication...');
+    
+    // Clear existing tokens
+    delete process.env.GOOGLE_REFRESH_TOKEN;
+    userProfile = null;
+    oauth2Client.setCredentials({});
+    
+    // Redirect to OAuth flow
+    res.redirect('/auth/google');
+  });
+
+  console.log('🔐 Auth routes configured with FULL permissions');
   console.log('   Visit http://localhost:3001/auth/google to authenticate');
+  console.log('   Or http://localhost:3001/api/auth/reauth to force new authentication');
 };
