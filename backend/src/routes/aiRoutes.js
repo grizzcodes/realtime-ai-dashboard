@@ -12,6 +12,13 @@ module.exports = function(app, io, integrationService, supabaseClient) {
     apiKey: process.env.ANTHROPIC_API_KEY
   });
 
+  // Known contacts mapping (you should move this to a database)
+  const KNOWN_CONTACTS = {
+    'leo': 'leo@dgenz.world', // Update with Leo's actual email
+    'andy': 'andy@dgenz.world',
+    'alec': 'alec@dgenz.world'
+  };
+
   // Helper to execute calendar actions
   async function executeCalendarAction(action, params) {
     console.log('📅 Executing calendar action:', action, params);
@@ -31,15 +38,16 @@ module.exports = function(app, io, integrationService, supabaseClient) {
       switch(action) {
         case 'create_event':
           // Parse the event details
-          const { title, date, time, attendees, description } = params;
+          const { title, date, time, attendees, description, timezone } = params;
           
-          // Convert natural language date/time to proper format
-          const eventDate = parseEventDateTime(date, time);
+          // Convert natural language date/time to proper format with timezone
+          const eventDate = parseEventDateTime(date, time, timezone);
           
           console.log('📅 Creating event with details:', {
             title: title || 'Meeting',
             start: eventDate.start,
             end: eventDate.end,
+            timezone: eventDate.timezone,
             attendees
           });
           
@@ -49,13 +57,14 @@ module.exports = function(app, io, integrationService, supabaseClient) {
             description: description || '',
             start: {
               dateTime: eventDate.start,
-              timeZone: 'America/New_York' // Using EST as requested
+              timeZone: eventDate.timezone
             },
             end: {
               dateTime: eventDate.end,
-              timeZone: 'America/New_York'
+              timeZone: eventDate.timezone
             },
-            attendees: attendees ? attendees.map(email => ({ email })) : [],
+            attendees: attendees && attendees.length > 0 ? 
+              attendees.map(email => ({ email })) : [],
             reminders: {
               useDefault: false,
               overrides: [
@@ -96,8 +105,8 @@ module.exports = function(app, io, integrationService, supabaseClient) {
     }
   }
 
-  // Helper to parse natural language dates with timezone support
-  function parseEventDateTime(dateStr, timeStr) {
+  // Helper to parse natural language dates with proper timezone handling
+  function parseEventDateTime(dateStr, timeStr, timezone = 'America/New_York') {
     const now = new Date();
     let eventDate = new Date();
     
@@ -111,7 +120,7 @@ module.exports = function(app, io, integrationService, supabaseClient) {
       eventDate = new Date(dateStr);
     }
     
-    // Parse time (e.g., "12pm", "10am", "10:00 AM", "3:30pm")
+    // Parse time - FIXED to handle EST/EDT properly
     if (timeStr) {
       // Enhanced regex to catch more time formats
       const timeMatch = timeStr.match(/(\d{1,2}):?(\d{2})?\s*(am|pm|AM|PM)?/i);
@@ -120,12 +129,14 @@ module.exports = function(app, io, integrationService, supabaseClient) {
         const minutes = parseInt(timeMatch[2] || '0');
         const meridiem = timeMatch[3];
         
-        if (meridiem?.toLowerCase() === 'pm' && hours < 12) {
+        // Handle 12-hour format
+        if (meridiem?.toLowerCase() === 'pm' && hours !== 12) {
           hours += 12;
         } else if (meridiem?.toLowerCase() === 'am' && hours === 12) {
           hours = 0;
         }
         
+        // Set the time
         eventDate.setHours(hours, minutes, 0, 0);
       }
     }
@@ -134,9 +145,20 @@ module.exports = function(app, io, integrationService, supabaseClient) {
     const endDate = new Date(eventDate);
     endDate.setHours(endDate.getHours() + 1);
     
+    // Determine actual timezone
+    let actualTimezone = timezone;
+    if (timeStr?.toLowerCase().includes('est') || timeStr?.toLowerCase().includes('et')) {
+      actualTimezone = 'America/New_York';
+    } else if (timeStr?.toLowerCase().includes('pst') || timeStr?.toLowerCase().includes('pt')) {
+      actualTimezone = 'America/Los_Angeles';
+    } else if (timeStr?.toLowerCase().includes('cst') || timeStr?.toLowerCase().includes('ct')) {
+      actualTimezone = 'America/Chicago';
+    }
+    
     return {
       start: eventDate.toISOString(),
-      end: endDate.toISOString()
+      end: endDate.toISOString(),
+      timezone: actualTimezone
     };
   }
 
@@ -151,45 +173,53 @@ module.exports = function(app, io, integrationService, supabaseClient) {
         lowerMessage.includes('invite') ||
         lowerMessage.includes('call') ||
         lowerMessage.includes('setup') ||
+        lowerMessage.includes('create') ||
         lowerMessage.includes('book') ||
         lowerMessage.includes('appointment')) {
       
       // Extract email addresses
       const emailRegex = /[\w.-]+@[\w.-]+\.\w+/g;
-      const emails = message.match(emailRegex) || [];
+      let emails = message.match(emailRegex) || [];
+      
+      // Extract names and map to emails
+      const attendeeNames = [];
+      for (const [name, email] of Object.entries(KNOWN_CONTACTS)) {
+        if (lowerMessage.includes(name)) {
+          attendeeNames.push(email);
+          console.log(`📋 Found attendee: ${name} -> ${email}`);
+        }
+      }
+      
+      // Combine found emails with mapped names
+      emails = [...new Set([...emails, ...attendeeNames])];
       
       // Enhanced time extraction - handle "12pm est" format
-      const timeRegex = /(\d{1,2}):?(\d{2})?\s*(am|pm|AM|PM)/gi;
+      const timeRegex = /(\d{1,2}):?(\d{2})?\s*(am|pm|AM|PM)\s*(est|edt|pst|pdt|cst|cdt|et|pt|ct)?/gi;
       const timeMatches = message.match(timeRegex);
       const time = timeMatches ? timeMatches[0] : null;
+      
+      // Extract timezone
+      let timezone = 'America/New_York'; // Default to EST
+      if (lowerMessage.includes('pst') || lowerMessage.includes('pt') || lowerMessage.includes('pacific')) {
+        timezone = 'America/Los_Angeles';
+      } else if (lowerMessage.includes('cst') || lowerMessage.includes('ct') || lowerMessage.includes('central')) {
+        timezone = 'America/Chicago';
+      }
       
       // Extract date keywords
       const tomorrow = lowerMessage.includes('tomorrow');
       const today = lowerMessage.includes('today');
       const nextWeek = lowerMessage.includes('next week');
       
-      // Extract title - enhanced to handle "called XXX" pattern
+      // Extract title - enhanced to handle various patterns
       let title = extractTitle(message);
-      
-      // Special case: if message contains "called", use what comes after it
-      const calledMatch = message.match(/called\s+(.+?)(?:\s+at|\s+on|\s+with|$)/i);
-      if (calledMatch) {
-        title = calledMatch[1].trim();
-      }
-      
-      // Extract attendee names (for now, just capture them)
-      const attendees = [];
-      if (lowerMessage.includes('leo')) {
-        // You might want to map names to emails here
-        // For now, we'll just note the name
-        console.log('📋 Attendee mentioned: Leo');
-      }
       
       console.log('🎯 Calendar intent detected:', {
         time,
         date: tomorrow ? 'tomorrow' : (today ? 'today' : null),
         title,
-        attendees: emails
+        attendees: emails,
+        timezone
       });
       
       return {
@@ -199,7 +229,8 @@ module.exports = function(app, io, integrationService, supabaseClient) {
           attendees: emails,
           time: time,
           date: tomorrow ? 'tomorrow' : (today ? 'today' : nextWeek ? 'next week' : null),
-          title: title
+          title: title,
+          timezone: timezone
         }
       };
     }
@@ -209,21 +240,26 @@ module.exports = function(app, io, integrationService, supabaseClient) {
 
   // Extract meeting title from message - ENHANCED
   function extractTitle(message) {
-    // Try to extract text after "called"
-    const calledMatch = message.match(/called\s+['"]?([^'"]+?)['"]?(?:\s+at|\s+on|\s+with|$)/i);
-    if (calledMatch) return calledMatch[1].trim();
+    // Try to extract text after "named" or "called" or "titled"
+    const namedMatch = message.match(/(?:named|called|titled)\s+['"]?([^'"]+?)['"]?(?:\s+at|\s+on|\s+with|\s+for|$)/i);
+    if (namedMatch) return namedMatch[1].trim();
     
     // Try to extract text between quotes
     const quotedMatch = message.match(/["']([^"']+)["']/);
     if (quotedMatch) return quotedMatch[1];
     
     // Try to extract after "about" or "for" or "regarding"
-    const aboutMatch = message.match(/(?:about|for|regarding)\s+(.+?)(?:\s+(?:at|on|with)|$)/i);
-    if (aboutMatch) return aboutMatch[1].trim();
+    const aboutMatch = message.match(/(?:about|for|regarding)\s+(.+?)(?:\s+(?:at|on|with|tomorrow|today)|$)/i);
+    if (aboutMatch && !aboutMatch[1].includes('and')) {
+      return aboutMatch[1].trim();
+    }
     
     // If message contains specific project/topic keywords
-    if (message.toLowerCase().includes('cgi')) return 'CGI Meeting';
-    if (message.toLowerCase().includes('test')) return 'Test Meeting';
+    if (message.toLowerCase().includes('cgi')) {
+      // Extract the full phrase containing CGI
+      const cgiMatch = message.match(/\b(cgi[^,.\s]*(?:\s+[^,.\s]+)?)\b/i);
+      if (cgiMatch) return cgiMatch[1].trim();
+    }
     
     // Default title
     return 'Meeting';
@@ -247,7 +283,14 @@ module.exports = function(app, io, integrationService, supabaseClient) {
       let systemPrompt = `You are a helpful AI assistant for DGenz company. 
       You have access to the company calendar and can create events.
       When users ask to schedule meetings or create calendar events, acknowledge that you're creating the event.
-      Always be specific about what actions you're taking.`;
+      Always be specific about what actions you're taking.
+      
+      Known team members:
+      - Leo (leo@dgenz.world)
+      - Andy (andy@dgenz.world)
+      - Alec (alec@dgenz.world)
+      
+      When someone mentions a team member by name, use their email for calendar invites.`;
       
       // Get AI response
       let aiResponse = '';
@@ -265,7 +308,7 @@ module.exports = function(app, io, integrationService, supabaseClient) {
       
       // Now get AI response with context about what was done
       const actionContext = actionResult?.success ? 
-        `\n[System: Calendar event "${actionIntent?.params?.title}" was successfully created]` : 
+        `\n[System: Calendar event "${actionIntent?.params?.title}" was successfully created with attendees: ${actionIntent?.params?.attendees?.join(', ') || 'none'}]` : 
         actionResult?.error ? 
         `\n[System: Failed to create calendar event: ${actionResult.error}]` : '';
       
@@ -377,6 +420,7 @@ module.exports = function(app, io, integrationService, supabaseClient) {
 
   console.log('🤖 AI routes loaded with ENHANCED calendar action execution');
   console.log('   - Detects: call, setup, meeting, schedule, book, appointment');
-  console.log('   - Handles: "called XXX" pattern for event titles');
-  console.log('   - Uses fixed calendar service when available');
+  console.log('   - Maps names to emails: Leo, Andy, Alec');
+  console.log('   - Handles timezones: EST, PST, CST');
+  console.log('   - Better title extraction for "named/called/titled" patterns');
 };
