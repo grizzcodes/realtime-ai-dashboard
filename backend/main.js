@@ -78,6 +78,12 @@ if (fs.existsSync(path.join(__dirname, 'src/routes/tokenRefreshRoute.js'))) {
   console.log('🔧 Token refresh route loaded - /api/auth/force-refresh-tokens');
 }
 
+// Load Token Reset Route (COMPLETE RESET)
+if (fs.existsSync(path.join(__dirname, 'src/routes/tokenResetRoute.js'))) {
+  require('./src/routes/tokenResetRoute')(app);
+  console.log('🔧 Token RESET route loaded - /api/auth/reset-and-fix');
+}
+
 // Load Calendar Fix Route (EMERGENCY FIX)
 if (fs.existsSync(path.join(__dirname, 'src/routes/calendarFixRoute.js'))) {
   require('./src/routes/calendarFixRoute')(app);
@@ -91,11 +97,7 @@ if (fs.existsSync(path.join(__dirname, 'src/routes/ai-enhanced.js'))) {
 }
 
 // Load Google Drive routes
-if (fs.existsSync(path.join(__dirname, 'src/routes/driveRoutes.js'))) {
-  const driveRoutes = require('./src/routes/driveRoutes');
-  app.use('/api/drive', driveRoutes);
-  console.log('📁 Google Drive routes loaded');
-} else if (fs.existsSync(path.join(__dirname, 'src/services/googleDriveService.js'))) {
+if (fs.existsSync(path.join(__dirname, 'src/services/googleDriveService.js'))) {
   // If service exists but routes don't, create basic routes inline
   const GoogleDriveService = require('./src/services/googleDriveService');
   const driveService = new GoogleDriveService();
@@ -180,8 +182,9 @@ server.listen(PORT, () => {
     console.log('');
   } else {
     console.log('');
-    console.log('📅 Calendar still not working? Run emergency fix:');
-    console.log(`   http://localhost:${PORT}/api/calendar/fix-and-test`);
+    console.log('📅 Calendar still not working? Try these fixes:');
+    console.log(`   1. Complete reset: http://localhost:${PORT}/api/auth/reset-and-fix`);
+    console.log(`   2. Emergency fix: http://localhost:${PORT}/api/calendar/fix-and-test`);
     console.log('');
   }
 });
