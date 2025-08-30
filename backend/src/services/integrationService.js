@@ -36,6 +36,43 @@ class IntegrationService {
     console.log('🔧 IntegrationService initialized with SUPA-Gmail connection');
   }
 
+  // NEW METHOD: Update Google Auth for all services
+  updateGoogleAuth(newOAuth2Client) {
+    try {
+      console.log('🔄 Updating Google Auth for all services...');
+      
+      // Update main auth
+      this.googleAuth = newOAuth2Client;
+      
+      // Update Gmail service
+      if (this.gmailService) {
+        this.gmailService.auth = newOAuth2Client;
+        this.gmailService.gmail = google.gmail({ version: 'v1', auth: newOAuth2Client });
+        console.log('✅ Gmail service auth updated');
+      }
+      
+      // Update Calendar service
+      if (this.calendarService) {
+        this.calendarService.oauth2Client = newOAuth2Client;
+        this.calendarService.calendar = google.calendar({ version: 'v3', auth: newOAuth2Client });
+        console.log('✅ Calendar service auth updated');
+      }
+      
+      // Update any Drive service if it exists
+      if (this.driveService) {
+        this.driveService.auth = newOAuth2Client;
+        this.driveService.drive = google.drive({ version: 'v3', auth: newOAuth2Client });
+        console.log('✅ Drive service auth updated');
+      }
+      
+      console.log('✅ All Google services updated with new auth');
+      return true;
+    } catch (error) {
+      console.error('❌ Failed to update Google Auth:', error);
+      return false;
+    }
+  }
+
   // ===== GMAIL METHODS =====
   async getLatestEmails(limit = 100) { // ENHANCED: Default to 100 emails
     try {
