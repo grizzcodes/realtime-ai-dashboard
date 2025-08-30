@@ -1,388 +1,185 @@
-// backend/src/services/calendarService.js - Enhanced Google Calendar integration
+// backend/src/services/calendarService.js
 const { google } = require('googleapis');
 
 class CalendarService {
   constructor() {
-    this.calendar = null;
-    
-    if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
-      this.auth = new google.auth.OAuth2(
+    // Check if we have a fixed OAuth client from the emergency fix
+    if (global.fixedOAuthClient) {
+      console.log('✅ Using fixed OAuth client from emergency fix');
+      this.oauth2Client = global.fixedOAuthClient;
+      this.calendar = google.calendar({ version: 'v3', auth: this.oauth2Client });
+    } else if (global.calendarServiceAuth) {
+      console.log('✅ Using OAuth client from auth routes');
+      this.oauth2Client = global.calendarServiceAuth;
+      this.calendar = google.calendar({ version: 'v3', auth: this.oauth2Client });
+    } else {
+      // Fallback to creating new OAuth client
+      this.oauth2Client = new google.auth.OAuth2(
         process.env.GOOGLE_CLIENT_ID,
         process.env.GOOGLE_CLIENT_SECRET,
         'http://localhost:3001/auth/google/callback'
       );
-      
+
       if (process.env.GOOGLE_REFRESH_TOKEN) {
-        this.auth.setCredentials({
+        this.oauth2Client.setCredentials({
           refresh_token: process.env.GOOGLE_REFRESH_TOKEN
         });
-        
-        this.calendar = google.calendar({ version: 'v3', auth: this.auth });
-        console.log('✅ CalendarService initialized with Google OAuth');
-      } else {
-        console.log('⚠️ CalendarService: No refresh token, OAuth needed');
       }
-    } else {
-      console.log('⚠️ CalendarService: Google credentials not configured');
+
+      this.calendar = google.calendar({ version: 'v3', auth: this.oauth2Client });
+    }
+    
+    console.log('📅 CalendarService initialized');
+  }
+
+  // Force refresh the OAuth token before making requests
+  async ensureAuth() {
+    try {
+      // If we don't have an access token, refresh it
+      const credentials = await this.oauth2Client.getAccessToken();
+      if (!credentials.token) {
+        console.log('🔄 Refreshing calendar access token...');
+        const { credentials: newCreds } = await this.oauth2Client.refreshAccessToken();
+        this.oauth2Client.setCredentials(newCreds);
+        console.log('✅ Calendar access token refreshed');
+      }
+      return true;
+    } catch (error) {
+      console.error('❌ Failed to ensure auth:', error.message);
+      
+      // Try to use the fixed OAuth client if available
+      if (global.fixedOAuthClient && global.fixedOAuthClient !== this.oauth2Client) {
+        console.log('🔄 Switching to fixed OAuth client...');
+        this.oauth2Client = global.fixedOAuthClient;
+        this.calendar = google.calendar({ version: 'v3', auth: this.oauth2Client });
+        return true;
+      }
+      
+      return false;
     }
   }
 
   async testConnection() {
-    if (!this.calendar) {
-      return { 
-        success: false, 
-        error: 'Calendar not configured. Set up Google OAuth first.' 
-      };
-    }
-
     try {
+      // Ensure we have valid auth
+      await this.ensureAuth();
+      
       const response = await this.calendar.calendarList.list({
         maxResults: 1
       });
-      
+
+      if (response.data.items && response.data.items.length > 0) {
+        return {
+          success: true,
+          message: `Connected to calendar: ${response.data.items[0].summary}`,
+          calendarId: response.data.items[0].id
+        };
+      }
+
       return {
         success: true,
-        message: 'Google Calendar connected successfully'
+        message: 'Calendar API connected',
+        calendarId: 'primary'
       };
     } catch (error) {
+      console.error('Calendar connection test failed:', error);
       return {
         success: false,
-        error: error.message
+        error: error.message || 'Failed to connect to Google Calendar'
       };
     }
-  }
-
-  // Helper function to calculate time until meeting
-  calculateTimeUntil(startTime) {
-    const now = new Date();
-    const start = new Date(startTime);
-    const timeDiff = start - now;
-    
-    // If meeting is in the past or ongoing
-    if (timeDiff < 0) {
-      const endTime = new Date(start.getTime() + 60 * 60 * 1000); // Assume 1 hour meeting
-      if (now < endTime) {
-        return { text: 'In progress', status: 'ongoing' };
-      }
-      return { text: 'Past', status: 'past' };
-    }
-    
-    // Calculate time components
-    const minutes = Math.floor(timeDiff / (1000 * 60));
-    const hours = Math.floor(minutes / 60);
-    const days = Math.floor(hours / 24);
-    
-    // Format the output
-    let timeUntil = '';
-    let status = 'upcoming';
-    
-    if (days > 0) {
-      const remainingHours = hours % 24;
-      if (days === 1 && remainingHours === 0) {
-        timeUntil = '1 day';
-      } else if (days === 1) {
-        timeUntil = `1 day ${remainingHours} hour${remainingHours !== 1 ? 's' : ''}`;
-      } else {
-        timeUntil = `${days} days ${remainingHours > 0 ? remainingHours + ' hour' + (remainingHours !== 1 ? 's' : '') : ''}`.trim();
-      }
-    } else if (hours > 0) {
-      const remainingMinutes = minutes % 60;
-      if (hours === 1 && remainingMinutes === 0) {
-        timeUntil = '1 hour';
-        status = 'soon';
-      } else if (hours === 1) {
-        timeUntil = `1 hour ${remainingMinutes} min`;
-        status = 'soon';
-      } else {
-        timeUntil = `${hours} hours ${remainingMinutes > 0 ? remainingMinutes + ' min' : ''}`.trim();
-        status = hours <= 3 ? 'soon' : 'upcoming';
-      }
-    } else {
-      timeUntil = `${minutes} minute${minutes !== 1 ? 's' : ''}`;
-      status = 'imminent';
-    }
-    
-    return { text: timeUntil, status, days, hours, minutes };
-  }
-
-  async getUpcomingMeetings(limit = 10) {
-    // Try to fetch real data first
-    if (this.calendar) {
-      try {
-        // Refresh the access token
-        const { credentials } = await this.auth.refreshAccessToken();
-        this.auth.setCredentials(credentials);
-
-        const now = new Date();
-        const maxTime = new Date();
-        maxTime.setDate(maxTime.getDate() + 14); // Get events for next 2 weeks
-        
-        const response = await this.calendar.events.list({
-          calendarId: 'primary',
-          timeMin: now.toISOString(),
-          timeMax: maxTime.toISOString(),
-          maxResults: limit,
-          singleEvents: true,
-          orderBy: 'startTime'
-        });
-
-        const events = response.data.items || [];
-        
-        if (events.length === 0) {
-          console.log('📅 No upcoming calendar events found');
-          return {
-            success: true,
-            meetings: this.generateDemoMeetings(3) // Return demo data if no real events
-          };
-        }
-        
-        const meetings = events.map(event => {
-          const startTime = event.start.dateTime || event.start.date;
-          const endTime = event.end.dateTime || event.end.date;
-          const timeInfo = this.calculateTimeUntil(startTime);
-          
-          // Extract attendees
-          const attendees = event.attendees || [];
-          const attendeeNames = attendees
-            .filter(a => !a.resource) // Exclude rooms/resources
-            .map(a => a.displayName || a.email?.split('@')[0] || 'Unknown');
-          
-          return {
-            id: event.id,
-            title: event.summary || 'No Title',
-            start: startTime,
-            end: endTime,
-            description: event.description,
-            location: event.location,
-            meetLink: event.hangoutLink || event.conferenceData?.entryPoints?.[0]?.uri,
-            attendees: attendeeNames,
-            attendeeCount: attendees.filter(a => !a.resource).length,
-            organizer: event.organizer?.displayName || event.organizer?.email,
-            timeUntil: timeInfo.text,
-            timeUntilStatus: timeInfo.status,
-            timeUntilDetails: {
-              days: timeInfo.days,
-              hours: timeInfo.hours,
-              minutes: timeInfo.minutes
-            },
-            allDay: !event.start.dateTime
-          };
-        });
-
-        console.log(`📅 Retrieved ${meetings.length} real calendar events`);
-        
-        return {
-          success: true,
-          meetings: meetings
-        };
-        
-      } catch (error) {
-        console.error('Failed to get calendar events:', error);
-        
-        // Check if it's an auth error
-        if (error.code === 401 || error.message.includes('invalid_grant')) {
-          console.log('📅 Auth failed - need to re-authenticate. Returning demo data.');
-          return {
-            success: true,
-            meetings: this.generateDemoMeetings(5),
-            needsAuth: true
-          };
-        }
-        
-        // Return demo data on error
-        return {
-          success: true,
-          meetings: this.generateDemoMeetings(3)
-        };
-      }
-    }
-    
-    // No calendar configured - return demo data
-    console.log('📅 Calendar not configured - returning demo data');
-    return {
-      success: true,
-      meetings: this.generateDemoMeetings(5),
-      demo: true
-    };
   }
 
   async getUpcomingEvents(days = 7) {
-    // Alias for getUpcomingMeetings with a different interface
-    const limit = Math.min(days * 3, 50); // Rough estimate of events per day
-    const result = await this.getUpcomingMeetings(limit);
-    
-    if (result.success) {
+    try {
+      // Ensure we have valid auth
+      await this.ensureAuth();
+      
+      const now = new Date();
+      const timeMin = now.toISOString();
+      const timeMax = new Date(now.getTime() + (days * 24 * 60 * 60 * 1000)).toISOString();
+
+      const response = await this.calendar.events.list({
+        calendarId: 'primary',
+        timeMin: timeMin,
+        timeMax: timeMax,
+        maxResults: 50,
+        singleEvents: true,
+        orderBy: 'startTime'
+      });
+
+      const events = response.data.items || [];
+      
       return {
         success: true,
-        events: result.meetings,
-        data: result.meetings
+        events: events.map(event => ({
+          id: event.id,
+          summary: event.summary || 'No title',
+          start: event.start?.dateTime || event.start?.date,
+          end: event.end?.dateTime || event.end?.date,
+          description: event.description,
+          location: event.location,
+          attendees: event.attendees?.map(a => ({
+            email: a.email,
+            responseStatus: a.responseStatus
+          })),
+          htmlLink: event.htmlLink
+        })),
+        count: events.length
       };
-    }
-    
-    return result;
-  }
-
-  generateDemoMeetings(count = 5) {
-    const now = new Date();
-    const demoMeetings = [
-      {
-        id: 'demo-1',
-        title: 'Team Standup',
-        start: new Date(now.getTime() + 2 * 60 * 60 * 1000).toISOString(), // 2 hours from now
-        end: new Date(now.getTime() + 2.5 * 60 * 60 * 1000).toISOString(),
-        attendees: ['Alec', 'Leo', 'Steph', 'Pablo'],
-        timeUntil: '2 hours',
-        timeUntilStatus: 'soon',
-        timeUntilDetails: { days: 0, hours: 2, minutes: 0 },
-        attendeeCount: 4,
-        location: 'Conference Room A',
-        description: 'Daily team sync to discuss progress and blockers'
-      },
-      {
-        id: 'demo-2', 
-        title: 'Client Review - TechCorp',
-        start: new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString(), // Tomorrow
-        end: new Date(now.getTime() + 25 * 60 * 60 * 1000).toISOString(),
-        attendees: ['Alec', 'Client Team'],
-        timeUntil: '1 day',
-        timeUntilStatus: 'upcoming',
-        timeUntilDetails: { days: 1, hours: 0, minutes: 0 },
-        attendeeCount: 5,
-        meetLink: 'https://meet.google.com/demo-link',
-        description: 'Quarterly review with TechCorp stakeholders'
-      },
-      {
-        id: 'demo-3',
-        title: 'Product Planning Session',
-        start: new Date(now.getTime() + 48 * 60 * 60 * 1000).toISOString(), // 2 days
-        end: new Date(now.getTime() + 50 * 60 * 60 * 1000).toISOString(),
-        attendees: ['Full Team'],
-        timeUntil: '2 days',
-        timeUntilStatus: 'upcoming',
-        timeUntilDetails: { days: 2, hours: 0, minutes: 0 },
-        attendeeCount: 8,
-        location: 'Main Office',
-        description: 'Sprint planning and roadmap discussion'
-      },
-      {
-        id: 'demo-4',
-        title: '1:1 with Manager',
-        start: new Date(now.getTime() + 3.5 * 24 * 60 * 60 * 1000).toISOString(), // 3.5 days
-        end: new Date(now.getTime() + 3.5 * 24 * 60 * 60 * 1000 + 30 * 60 * 1000).toISOString(),
-        attendees: ['You', 'Manager'],
-        timeUntil: '3 days 12 hours',
-        timeUntilStatus: 'upcoming',
-        timeUntilDetails: { days: 3, hours: 12, minutes: 0 },
-        attendeeCount: 2,
-        description: 'Monthly one-on-one discussion'
-      },
-      {
-        id: 'demo-5',
-        title: 'Marketing Sync',
-        start: new Date(now.getTime() + 5 * 24 * 60 * 60 * 1000).toISOString(), // 5 days
-        end: new Date(now.getTime() + 5 * 24 * 60 * 60 * 1000 + 60 * 60 * 1000).toISOString(),
-        attendees: ['Marketing Team'],
-        timeUntil: '5 days',
-        timeUntilStatus: 'upcoming',
-        timeUntilDetails: { days: 5, hours: 0, minutes: 0 },
-        attendeeCount: 6,
-        meetLink: 'https://zoom.us/demo-meeting',
-        description: 'Review marketing campaigns and metrics'
-      }
-    ];
-    
-    // Recalculate timeUntil for demo meetings to be accurate
-    return demoMeetings.slice(0, count).map(meeting => {
-      const timeInfo = this.calculateTimeUntil(meeting.start);
+    } catch (error) {
+      console.error('Failed to get upcoming events:', error);
       return {
-        ...meeting,
-        timeUntil: timeInfo.text,
-        timeUntilStatus: timeInfo.status,
-        timeUntilDetails: {
-          days: timeInfo.days,
-          hours: timeInfo.hours,
-          minutes: timeInfo.minutes
-        }
-      };
-    });
-  }
-
-  async createEvent(eventData) {
-    if (!this.calendar) {
-      console.log('⚠️ Calendar not configured - cannot create real event');
-      return { 
-        success: false, 
-        error: 'Calendar not configured. Please set up Google OAuth first.',
-        needsAuth: true
+        success: false,
+        error: error.message,
+        events: []
       };
     }
+  }
 
+  async createEvent(eventDetails) {
     try {
-      console.log('📅 Creating calendar event:', eventData);
-      
-      // Ensure we have valid start and end times
-      const startDateTime = eventData.start?.dateTime || eventData.startTime;
-      const endDateTime = eventData.end?.dateTime || eventData.endTime;
-      
-      if (!startDateTime) {
-        return {
-          success: false,
-          error: 'Start time is required'
-        };
+      // CRITICAL: Ensure we have valid auth before creating event
+      const authValid = await this.ensureAuth();
+      if (!authValid) {
+        throw new Error('Failed to authenticate with Google Calendar');
       }
+      
+      console.log('📅 Creating calendar event:', eventDetails);
 
-      // If no end time provided, default to 1 hour after start
-      const endTime = endDateTime || new Date(new Date(startDateTime).getTime() + 60 * 60 * 1000).toISOString();
-
+      // Build the event object
       const event = {
-        summary: eventData.summary || eventData.title || 'Meeting',
-        description: eventData.description || '',
-        start: {
-          dateTime: startDateTime,
-          timeZone: eventData.timeZone || 'America/Los_Angeles',
-        },
-        end: {
-          dateTime: endTime,
-          timeZone: eventData.timeZone || 'America/Los_Angeles',
-        },
-        attendees: eventData.attendees?.map(email => {
-          // Handle both string emails and object format
-          if (typeof email === 'string') {
-            return { email };
-          }
-          return email;
-        }) || [],
-        reminders: eventData.reminders || {
+        summary: eventDetails.summary || 'New Event',
+        description: eventDetails.description || '',
+        start: eventDetails.start,
+        end: eventDetails.end,
+        attendees: eventDetails.attendees || [],
+        reminders: eventDetails.reminders || {
           useDefault: false,
           overrides: [
             { method: 'email', minutes: 30 },
             { method: 'popup', minutes: 10 }
           ]
-        },
+        }
       };
 
       // Add location if provided
-      if (eventData.location) {
-        event.location = eventData.location;
+      if (eventDetails.location) {
+        event.location = eventDetails.location;
       }
 
       // Add conference data if requested
-      if (eventData.conferenceData || eventData.addMeet) {
-        event.conferenceData = {
-          createRequest: {
-            requestId: `meet-${Date.now()}`,
-            conferenceSolutionKey: { type: 'hangoutsMeet' }
-          }
-        };
+      if (eventDetails.conferenceData) {
+        event.conferenceData = eventDetails.conferenceData;
       }
 
       console.log('📅 Sending event to Google Calendar:', event);
 
       const response = await this.calendar.events.insert({
         calendarId: 'primary',
-        resource: event,
-        conferenceDataVersion: eventData.addMeet ? 1 : 0,
-        sendUpdates: 'all' // Send invites to all attendees
+        requestBody: event,
+        conferenceDataVersion: eventDetails.conferenceData ? 1 : 0,
+        sendUpdates: 'all'
       });
 
       console.log('✅ Calendar event created successfully:', response.data.id);
@@ -390,19 +187,45 @@ class CalendarService {
       return {
         success: true,
         data: response.data,
-        event: response.data,
-        eventId: response.data.id,
-        htmlLink: response.data.htmlLink,
-        message: `Event "${event.summary}" created successfully`
+        message: `Event "${event.summary}" created successfully`,
+        htmlLink: response.data.htmlLink
       };
     } catch (error) {
       console.error('❌ Failed to create calendar event:', error);
       
-      // Check for auth errors
-      if (error.code === 401 || error.message?.includes('invalid_grant')) {
+      // Check if it's a permission error
+      if (error.message?.includes('Insufficient Permission') || error.status === 403) {
+        // Try to fix by running the emergency calendar fix
+        console.log('🚨 Permission error detected - attempting to use fixed OAuth client...');
+        
+        if (global.fixedOAuthClient) {
+          this.oauth2Client = global.fixedOAuthClient;
+          this.calendar = google.calendar({ version: 'v3', auth: this.oauth2Client });
+          
+          // Retry the event creation
+          try {
+            const retryResponse = await this.calendar.events.insert({
+              calendarId: 'primary',
+              requestBody: eventDetails,
+              conferenceDataVersion: eventDetails.conferenceData ? 1 : 0,
+              sendUpdates: 'all'
+            });
+            
+            console.log('✅ Event created on retry with fixed OAuth client');
+            return {
+              success: true,
+              data: retryResponse.data,
+              message: `Event created successfully (after auth fix)`,
+              htmlLink: retryResponse.data.htmlLink
+            };
+          } catch (retryError) {
+            console.error('❌ Retry also failed:', retryError.message);
+          }
+        }
+        
         return {
           success: false,
-          error: 'Authentication expired. Please re-authenticate with Google.',
+          error: 'Calendar permission error. Please run: http://localhost:3001/api/calendar/fix-and-test',
           needsAuth: true
         };
       }
@@ -410,6 +233,122 @@ class CalendarService {
       return {
         success: false,
         error: error.message || 'Failed to create calendar event'
+      };
+    }
+  }
+
+  async updateEvent(eventId, updates) {
+    try {
+      await this.ensureAuth();
+      
+      // First get the existing event
+      const existing = await this.calendar.events.get({
+        calendarId: 'primary',
+        eventId: eventId
+      });
+
+      // Merge updates with existing data
+      const updatedEvent = {
+        ...existing.data,
+        ...updates
+      };
+
+      const response = await this.calendar.events.update({
+        calendarId: 'primary',
+        eventId: eventId,
+        requestBody: updatedEvent
+      });
+
+      return {
+        success: true,
+        data: response.data,
+        message: 'Event updated successfully'
+      };
+    } catch (error) {
+      console.error('Failed to update event:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
+  async deleteEvent(eventId) {
+    try {
+      await this.ensureAuth();
+      
+      await this.calendar.events.delete({
+        calendarId: 'primary',
+        eventId: eventId
+      });
+
+      return {
+        success: true,
+        message: 'Event deleted successfully'
+      };
+    } catch (error) {
+      console.error('Failed to delete event:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
+  async searchEvents(query, options = {}) {
+    try {
+      await this.ensureAuth();
+      
+      const params = {
+        calendarId: 'primary',
+        q: query,
+        singleEvents: true,
+        orderBy: 'startTime',
+        maxResults: options.maxResults || 10
+      };
+
+      if (options.timeMin) {
+        params.timeMin = options.timeMin;
+      }
+      if (options.timeMax) {
+        params.timeMax = options.timeMax;
+      }
+
+      const response = await this.calendar.events.list(params);
+
+      return {
+        success: true,
+        events: response.data.items || [],
+        count: (response.data.items || []).length
+      };
+    } catch (error) {
+      console.error('Failed to search events:', error);
+      return {
+        success: false,
+        error: error.message,
+        events: []
+      };
+    }
+  }
+
+  async getCalendarList() {
+    try {
+      await this.ensureAuth();
+      
+      const response = await this.calendar.calendarList.list({
+        maxResults: 50
+      });
+
+      return {
+        success: true,
+        calendars: response.data.items || []
+      };
+    } catch (error) {
+      console.error('Failed to get calendar list:', error);
+      return {
+        success: false,
+        error: error.message,
+        calendars: []
       };
     }
   }
