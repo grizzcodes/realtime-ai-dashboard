@@ -55,6 +55,39 @@ class GmailService {
     }
   }
 
+  async getEmailDetails(emailId) {
+    try {
+      await this.ensureAuth();
+      
+      const fullMessage = await this.gmail.users.messages.get({
+        userId: 'me',
+        id: emailId
+      });
+
+      const headers = fullMessage.data.payload.headers;
+      const fromHeader = headers.find(h => h.name === 'From');
+      const toHeader = headers.find(h => h.name === 'To');
+      const subjectHeader = headers.find(h => h.name === 'Subject');
+      const dateHeader = headers.find(h => h.name === 'Date');
+
+      return {
+        id: emailId,
+        threadId: fullMessage.data.threadId,
+        from: fromHeader?.value || 'Unknown',
+        to: toHeader?.value || '',
+        subject: subjectHeader?.value || 'No subject',
+        snippet: fullMessage.data.snippet,
+        date: dateHeader?.value || new Date().toISOString(),
+        isUnread: fullMessage.data.labelIds?.includes('UNREAD') || false,
+        labels: fullMessage.data.labelIds || [],
+        body: this.extractBody(fullMessage.data.payload)
+      };
+    } catch (error) {
+      console.error(`Failed to get email details for ${emailId}:`, error.message);
+      return null;
+    }
+  }
+
   async getRecentEmails(limit = 50) {
     try {
       await this.ensureAuth();
@@ -77,27 +110,10 @@ class GmailService {
       const emails = [];
       for (const message of response.data.messages) {
         try {
-          const fullMessage = await this.gmail.users.messages.get({
-            userId: 'me',
-            id: message.id
-          });
-
-          const headers = fullMessage.data.payload.headers;
-          const fromHeader = headers.find(h => h.name === 'From');
-          const subjectHeader = headers.find(h => h.name === 'Subject');
-          const dateHeader = headers.find(h => h.name === 'Date');
-
-          const emailData = {
-            id: message.id,
-            threadId: message.threadId,
-            from: fromHeader?.value || 'Unknown',
-            subject: subjectHeader?.value || 'No subject',
-            snippet: fullMessage.data.snippet,
-            date: dateHeader?.value || new Date().toISOString(),
-            isUnread: fullMessage.data.labelIds?.includes('UNREAD') || false
-          };
-
-          emails.push(emailData);
+          const emailDetails = await this.getEmailDetails(message.id);
+          if (emailDetails) {
+            emails.push(emailDetails);
+          }
         } catch (msgError) {
           console.error(`Failed to fetch message ${message.id}:`, msgError.message);
         }
@@ -142,27 +158,10 @@ class GmailService {
             const emails = [];
             for (const message of response.data.messages) {
               try {
-                const fullMessage = await this.gmail.users.messages.get({
-                  userId: 'me',
-                  id: message.id
-                });
-
-                const headers = fullMessage.data.payload.headers;
-                const fromHeader = headers.find(h => h.name === 'From');
-                const subjectHeader = headers.find(h => h.name === 'Subject');
-                const dateHeader = headers.find(h => h.name === 'Date');
-
-                const emailData = {
-                  id: message.id,
-                  threadId: message.threadId,
-                  from: fromHeader?.value || 'Unknown',
-                  subject: subjectHeader?.value || 'No subject',
-                  snippet: fullMessage.data.snippet,
-                  date: dateHeader?.value || new Date().toISOString(),
-                  isUnread: fullMessage.data.labelIds?.includes('UNREAD') || false
-                };
-
-                emails.push(emailData);
+                const emailDetails = await this.getEmailDetails(message.id);
+                if (emailDetails) {
+                  emails.push(emailDetails);
+                }
               } catch (msgError) {
                 console.error(`Failed to fetch message ${message.id}:`, msgError.message);
               }
