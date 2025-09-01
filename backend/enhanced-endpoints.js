@@ -1,4 +1,4 @@
-// backend/enhanced-endpoints.js - Fixed Notion endpoints
+// backend/enhanced-endpoints.js - Fixed Notion and Calendar endpoints
 // Note: app, io, and integrationService are provided by main.js as global variables
 
 // Import Magic Inbox Processor
@@ -129,16 +129,33 @@ app.get('/api/test/:service', async (req, res) => {
   }
 });
 
-// Calendar endpoints
+// Calendar endpoints - FIXED method name
 app.get('/api/calendar/next-meetings', async (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || 10;
     console.log(`📅 Fetching next ${limit} calendar events...`);
     
-    const result = await integrationService.calendarService.getUpcomingMeetings(limit);
+    // Use the correct method name: getUpcomingEvents
+    const result = await integrationService.calendarService.getUpcomingEvents(limit);
     
     if (result.success) {
-      res.json(result);
+      // Transform events to meetings format for compatibility
+      const meetings = result.events.map(event => ({
+        id: event.id,
+        title: event.summary,
+        start: event.start,
+        end: event.end,
+        description: event.description,
+        location: event.location,
+        attendees: event.attendees,
+        link: event.htmlLink
+      }));
+      
+      res.json({
+        success: true,
+        meetings: meetings,
+        count: meetings.length
+      });
     } else {
       console.log('Calendar not configured or failed:', result.error);
       res.json({
