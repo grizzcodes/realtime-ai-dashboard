@@ -1,60 +1,35 @@
 // backend/src/services/calendarService.js
 const { google } = require('googleapis');
+const { getAuthManager } = require('./googleAuthManager');
 
 class CalendarService {
   constructor() {
-    // Check if we have a fixed OAuth client from the emergency fix
-    if (global.fixedOAuthClient) {
-      console.log('✅ Using fixed OAuth client from emergency fix');
-      this.oauth2Client = global.fixedOAuthClient;
-      this.calendar = google.calendar({ version: 'v3', auth: this.oauth2Client });
-    } else if (global.calendarServiceAuth) {
-      console.log('✅ Using OAuth client from auth routes');
-      this.oauth2Client = global.calendarServiceAuth;
-      this.calendar = google.calendar({ version: 'v3', auth: this.oauth2Client });
-    } else {
-      // Fallback to creating new OAuth client
-      this.oauth2Client = new google.auth.OAuth2(
-        process.env.GOOGLE_CLIENT_ID,
-        process.env.GOOGLE_CLIENT_SECRET,
-        'http://localhost:3001/auth/google/callback'
-      );
-
-      if (process.env.GOOGLE_REFRESH_TOKEN) {
-        this.oauth2Client.setCredentials({
-          refresh_token: process.env.GOOGLE_REFRESH_TOKEN
-        });
-      }
-
-      this.calendar = google.calendar({ version: 'v3', auth: this.oauth2Client });
-    }
-    
-    console.log('📅 CalendarService initialized');
+    this.authManager = getAuthManager();
+    this.calendar = null;
+    this.initializeCalendar();
   }
 
-  // Force refresh the OAuth token before making requests
+  async initializeCalendar() {
+    try {
+      const auth = await this.authManager.getAuthClient();
+      this.calendar = google.calendar({ version: 'v3', auth });
+      console.log('📅 CalendarService initialized with GoogleAuthManager');
+    } catch (error) {
+      console.error('Failed to initialize calendar:', error.message);
+    }
+  }
+
   async ensureAuth() {
     try {
-      // If we don't have an access token, refresh it
-      const credentials = await this.oauth2Client.getAccessToken();
-      if (!credentials.token) {
-        console.log('🔄 Refreshing calendar access token...');
-        const { credentials: newCreds } = await this.oauth2Client.refreshAccessToken();
-        this.oauth2Client.setCredentials(newCreds);
-        console.log('✅ Calendar access token refreshed');
-      }
+      // Get fresh auth client from manager
+      const auth = await this.authManager.getAuthClient();
+      
+      // Update calendar instance with fresh auth
+      this.calendar = google.calendar({ version: 'v3', auth });
+      
       return true;
     } catch (error) {
       console.error('❌ Failed to ensure auth:', error.message);
-      
-      // Try to use the fixed OAuth client if available
-      if (global.fixedOAuthClient && global.fixedOAuthClient !== this.oauth2Client) {
-        console.log('🔄 Switching to fixed OAuth client...');
-        this.oauth2Client = global.fixedOAuthClient;
-        this.calendar = google.calendar({ version: 'v3', auth: this.oauth2Client });
-        return true;
-      }
-      
       return false;
     }
   }
@@ -129,6 +104,53 @@ class CalendarService {
       };
     } catch (error) {
       console.error('Failed to get upcoming events:', error);
+      
+      // Try to refresh auth and retry once
+      if (error.message?.includes('invalid_grant') || error.message?.includes('Token')) {
+        console.log('🔄 Attempting to refresh auth and retry...');
+        const authSuccess = await this.ensureAuth();
+        
+        if (authSuccess) {
+          try {
+            // Retry the request
+            const now = new Date();
+            const timeMin = now.toISOString();
+            const timeMax = new Date(now.getTime() + (days * 24 * 60 * 60 * 1000)).toISOString();
+
+            const response = await this.calendar.events.list({
+              calendarId: 'primary',
+              timeMin: timeMin,
+              timeMax: timeMax,
+              maxResults: 50,
+              singleEvents: true,
+              orderBy: 'startTime'
+            });
+
+            const events = response.data.items || [];
+            
+            return {
+              success: true,
+              events: events.map(event => ({
+                id: event.id,
+                summary: event.summary || 'No title',
+                start: event.start?.dateTime || event.start?.date,
+                end: event.end?.dateTime || event.end?.date,
+                description: event.description,
+                location: event.location,
+                attendees: event.attendees?.map(a => ({
+                  email: a.email,
+                  responseStatus: a.responseStatus
+                })),
+                htmlLink: event.htmlLink
+              })),
+              count: events.length
+            };
+          } catch (retryError) {
+            console.error('Retry also failed:', retryError.message);
+          }
+        }
+      }
+      
       return {
         success: false,
         error: error.message,
@@ -193,41 +215,41 @@ class CalendarService {
     } catch (error) {
       console.error('❌ Failed to create calendar event:', error);
       
-      // Check if it's a permission error
-      if (error.message?.includes('Insufficient Permission') || error.status === 403) {
-        // Try to fix by running the emergency calendar fix
-        console.log('🚨 Permission error detected - attempting to use fixed OAuth client...');
+      // Check if it's a permission/auth error and try to refresh
+      if (error.message?.includes('insufficient') || 
+          error.message?.includes('invalid_grant') || 
+          error.status === 403 || 
+          error.status === 401) {
         
-        if (global.fixedOAuthClient) {
-          this.oauth2Client = global.fixedOAuthClient;
-          this.calendar = google.calendar({ version: 'v3', auth: this.oauth2Client });
-          
-          // Retry the event creation
+        console.log('🔄 Auth error detected - attempting refresh...');
+        const authSuccess = await this.ensureAuth();
+        
+        if (authSuccess) {
           try {
-            const retryResponse = await this.calendar.events.insert({
+            // Retry the event creation
+            const response = await this.calendar.events.insert({
               calendarId: 'primary',
               requestBody: eventDetails,
               conferenceDataVersion: eventDetails.conferenceData ? 1 : 0,
               sendUpdates: 'all'
             });
             
-            console.log('✅ Event created on retry with fixed OAuth client');
+            console.log('✅ Event created on retry after auth refresh');
             return {
               success: true,
-              data: retryResponse.data,
-              message: `Event created successfully (after auth fix)`,
-              htmlLink: retryResponse.data.htmlLink
+              data: response.data,
+              message: `Event created successfully (after auth refresh)`,
+              htmlLink: response.data.htmlLink
             };
           } catch (retryError) {
             console.error('❌ Retry also failed:', retryError.message);
+            return {
+              success: false,
+              error: 'Calendar permission error. Please re-authenticate at /auth/google',
+              needsAuth: true
+            };
           }
         }
-        
-        return {
-          success: false,
-          error: 'Calendar permission error. Please run: http://localhost:3001/api/calendar/fix-and-test',
-          needsAuth: true
-        };
       }
       
       return {
