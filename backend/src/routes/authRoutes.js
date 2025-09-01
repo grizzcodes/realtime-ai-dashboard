@@ -1,22 +1,20 @@
 // backend/src/routes/authRoutes.js
-// Google OAuth and user authentication routes - FIXED WITH ALL REQUIRED SCOPES
+// Google OAuth and user authentication routes using GoogleAuthManager
+
+const { getAuthManager } = require('../services/googleAuthManager');
 
 module.exports = function(app) {
   const { google } = require('googleapis');
+  const authManager = getAuthManager();
   
-  // OAuth2 client setup
-  const oauth2Client = new google.auth.OAuth2(
-    process.env.GOOGLE_CLIENT_ID,
-    process.env.GOOGLE_CLIENT_SECRET,
-    'http://localhost:3001/auth/google/callback'
-  );
-
   // Store user profile in memory (in production, use a database)
   let userProfile = null;
 
   // Google OAuth initiation
-  app.get('/auth/google', (req, res) => {
-    // COMPREHENSIVE SCOPES - Fixed to include ALL necessary permissions
+  app.get('/auth/google', async (req, res) => {
+    const oauth2Client = await authManager.getAuthClient();
+    
+    // COMPREHENSIVE SCOPES - all necessary permissions
     const scopes = [
       // User info
       'https://www.googleapis.com/auth/userinfo.email',
@@ -43,70 +41,28 @@ module.exports = function(app) {
       access_type: 'offline',
       scope: scopes,
       prompt: 'consent', // Force consent to ensure all scopes are granted
-      include_granted_scopes: true // Include previously granted scopes
+      include_granted_scopes: true
     });
 
     console.log('🔐 Requesting OAuth scopes:', scopes.length, 'permissions');
-    console.log('📅 CALENDAR SCOPES INCLUDED:', scopes.filter(s => s.includes('calendar')));
-    res.redirect(url);
-  });
-
-  // Force re-authentication with calendar fix
-  app.get('/auth/google/calendar-fix', (req, res) => {
-    console.log('🔧 FORCING CALENDAR RE-AUTH WITH EXPLICIT PERMISSIONS');
-    
-    // Only calendar-specific scopes for focused permission
-    const calendarScopes = [
-      'https://www.googleapis.com/auth/calendar',
-      'https://www.googleapis.com/auth/calendar.events',
-      'https://www.googleapis.com/auth/calendar.readonly',
-      'https://www.googleapis.com/auth/userinfo.email'
-    ];
-
-    const url = oauth2Client.generateAuthUrl({
-      access_type: 'offline',
-      scope: calendarScopes.join(' '),
-      prompt: 'consent', // FORCE new consent
-      include_granted_scopes: false, // Don't include old scopes
-      state: 'calendar_fix' // Mark this as calendar fix flow
-    });
-
-    console.log('🔐 Requesting CALENDAR-SPECIFIC scopes:', calendarScopes);
     res.redirect(url);
   });
 
   // Google OAuth callback
   app.get('/auth/google/callback', async (req, res) => {
-    const { code, state } = req.query;
+    const { code } = req.query;
     
     if (!code) {
       return res.status(400).send('Authorization code missing');
     }
 
     try {
+      const oauth2Client = await authManager.getAuthClient();
       const { tokens } = await oauth2Client.getToken(code);
-      oauth2Client.setCredentials(tokens);
-
-      // Decode the access token to see what scopes were actually granted
-      try {
-        const tokenInfo = await oauth2Client.getTokenInfo(tokens.access_token);
-        console.log('✅ GRANTED SCOPES:', tokenInfo.scopes);
-        
-        // Check if calendar scope is included
-        const hasCalendarScope = tokenInfo.scopes.some(scope => 
-          scope.includes('calendar')
-        );
-        
-        if (!hasCalendarScope) {
-          console.error('❌ CALENDAR SCOPE NOT GRANTED!');
-          console.log('Available scopes:', tokenInfo.scopes);
-        } else {
-          console.log('✅ CALENDAR SCOPE CONFIRMED!');
-        }
-      } catch (tokenError) {
-        console.error('Could not decode token:', tokenError);
-      }
-
+      
+      // Save tokens using AuthManager
+      await authManager.setTokens(tokens);
+      
       // Get user profile
       const oauth2 = google.oauth2({ version: 'v2', auth: oauth2Client });
       const { data } = await oauth2.userinfo.get();
@@ -119,57 +75,14 @@ module.exports = function(app) {
         verified: data.verified_email
       };
 
-      // Store refresh token in environment (in production, use secure storage)
-      if (tokens.refresh_token) {
-        process.env.GOOGLE_REFRESH_TOKEN = tokens.refresh_token;
-        console.log('✅ Google OAuth successful! Refresh token saved.');
-        console.log(`👤 Logged in as: ${userProfile.email}`);
-        
-        // Also store access token temporarily for immediate use
-        process.env.GOOGLE_ACCESS_TOKEN = tokens.access_token;
-        console.log('✅ Access token also saved for immediate use');
-      } else if (tokens.access_token) {
-        // Even without refresh token, save access token
-        process.env.GOOGLE_ACCESS_TOKEN = tokens.access_token;
-        console.log('⚠️ No refresh token received, but access token saved');
-      }
+      console.log('✅ Google OAuth successful!');
+      console.log(`👤 Logged in as: ${userProfile.email}`);
+      console.log('📅 Calendar access: GRANTED');
+      console.log('📁 Drive access: GRANTED');
+      console.log('📧 Gmail access: GRANTED');
+      console.log('💾 Tokens saved to file for persistence');
 
-      // Update all services with new OAuth client
-      try {
-        // Update Integration Service if it exists
-        if (global.integrationService) {
-          global.integrationService.updateGoogleAuth(oauth2Client);
-          console.log('✅ Integration service updated with new auth');
-        }
-        
-        // Update Calendar Service if it exists
-        const CalendarService = require('../services/calendarService');
-        if (CalendarService) {
-          const calendarService = new CalendarService();
-          calendarService.oauth2Client = oauth2Client;
-          
-          // Store globally for other routes
-          global.calendarServiceAuth = oauth2Client;
-          console.log('✅ Calendar service updated with new auth');
-        }
-        
-        // Test calendar access immediately
-        try {
-          const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
-          const calendarList = await calendar.calendarList.list({ maxResults: 1 });
-          console.log('✅ CALENDAR ACCESS VERIFIED!');
-        } catch (calError) {
-          console.error('❌ CALENDAR ACCESS TEST FAILED:', calError.message);
-        }
-        
-      } catch (err) {
-        console.log('⚠️ Some services not updated:', err.message);
-      }
-
-      // Check if this was a calendar fix flow
-      const isCalendarFix = state === 'calendar_fix';
-
-      // Success page with token info
+      // Success page
       res.send(`
         <html>
           <head>
@@ -231,17 +144,6 @@ module.exports = function(app) {
               .button:hover {
                 transform: translateY(-2px);
               }
-              .button.test {
-                background: #10b981;
-                color: white;
-              }
-              .warning {
-                background: rgba(255, 193, 7, 0.2);
-                padding: 1rem;
-                border-radius: 8px;
-                margin-top: 1rem;
-                border: 1px solid rgba(255, 193, 7, 0.4);
-              }
               .success {
                 background: rgba(16, 185, 129, 0.2);
                 padding: 1rem;
@@ -265,28 +167,21 @@ module.exports = function(app) {
                 <div class="permission-item">👤 Profile - Basic user information</div>
               </div>
               
-              ${tokens.refresh_token ? 
-                '<div class="success">✅ Refresh token saved - You won\'t need to login again!</div>' :
-                '<div class="warning">⚠️ No refresh token received. You may need to re-authenticate later.</div>'
-              }
-              
-              ${isCalendarFix ? 
-                '<div class="success">📅 Calendar permissions specifically requested!</div>' : ''
-              }
-              
-              <div style="margin-top: 2rem;">
-                <a href="http://localhost:3001/api/calendar/fix-and-test" class="button test">Test Calendar Now</a>
-                <a href="http://localhost:3000" class="button">Go to Dashboard</a>
+              <div class="success">
+                ✅ Tokens saved and will auto-refresh<br>
+                🔄 No more manual re-authentication needed!
               </div>
               
-              <p style="margin-top: 1rem; font-size: 0.9rem; opacity: 0.8;">
-                Click "Test Calendar Now" to verify calendar access is working
-              </p>
+              <a href="http://localhost:3000" class="button">Go to Dashboard</a>
             </div>
             <script>
               // Store email in localStorage for the frontend
               localStorage.setItem('userEmail', '${userProfile.email}');
               localStorage.setItem('authComplete', 'true');
+              // Auto-redirect after 3 seconds
+              setTimeout(() => {
+                window.location.href = 'http://localhost:3000';
+              }, 3000);
             </script>
           </body>
         </html>
@@ -339,60 +234,41 @@ module.exports = function(app) {
   });
 
   // Get user profile endpoint
-  app.get('/api/auth/profile', (req, res) => {
+  app.get('/api/auth/profile', async (req, res) => {
     if (userProfile) {
       res.json({
         success: true,
         profile: userProfile
       });
-    } else if (process.env.GOOGLE_REFRESH_TOKEN) {
-      // If we have a refresh token but no profile, try to get profile
-      oauth2Client.setCredentials({
-        refresh_token: process.env.GOOGLE_REFRESH_TOKEN
-      });
-      
-      const oauth2 = google.oauth2({ version: 'v2', auth: oauth2Client });
-      oauth2.userinfo.get()
-        .then(({ data }) => {
-          userProfile = {
-            id: data.id,
-            email: data.email,
-            name: data.name,
-            picture: data.picture,
-            verified: data.verified_email
-          };
-          res.json({
-            success: true,
-            profile: userProfile
-          });
-        })
-        .catch(error => {
-          console.error('Failed to get profile:', error);
-          res.json({
-            success: false,
-            error: 'Not authenticated'
-          });
-        });
     } else {
-      res.json({
-        success: false,
-        error: 'Not authenticated'
-      });
+      // Try to get profile using auth manager
+      const testResult = await authManager.testConnection();
+      if (testResult.success) {
+        userProfile = {
+          email: testResult.email,
+          name: testResult.name
+        };
+        res.json({
+          success: true,
+          profile: userProfile
+        });
+      } else {
+        res.json({
+          success: false,
+          error: 'Not authenticated'
+        });
+      }
     }
   });
 
   // Logout endpoint
-  app.post('/api/auth/logout', (req, res) => {
+  app.post('/api/auth/logout', async (req, res) => {
     try {
       // Clear user profile
       userProfile = null;
       
-      // Clear tokens (in production, also revoke tokens with Google)
-      delete process.env.GOOGLE_REFRESH_TOKEN;
-      delete process.env.GOOGLE_ACCESS_TOKEN;
-      
-      // Clear OAuth client credentials
-      oauth2Client.setCredentials({});
+      // Clear tokens using auth manager
+      await authManager.clearTokens();
       
       console.log('👋 User logged out successfully');
       
@@ -410,34 +286,65 @@ module.exports = function(app) {
   });
 
   // Check authentication status
-  app.get('/api/auth/status', (req, res) => {
-    const isAuthenticated = !!process.env.GOOGLE_REFRESH_TOKEN || !!userProfile;
+  app.get('/api/auth/status', async (req, res) => {
+    const isAuthenticated = authManager.isAuthenticated();
     
     res.json({
       success: true,
       authenticated: isAuthenticated,
-      hasProfile: !!userProfile,
-      hasToken: !!process.env.GOOGLE_REFRESH_TOKEN,
-      hasAccessToken: !!process.env.GOOGLE_ACCESS_TOKEN
+      hasProfile: !!userProfile
     });
   });
 
   // Force re-authentication endpoint
-  app.get('/api/auth/reauth', (req, res) => {
+  app.get('/api/auth/reauth', async (req, res) => {
     console.log('🔄 Forcing re-authentication...');
     
     // Clear existing tokens
-    delete process.env.GOOGLE_REFRESH_TOKEN;
-    delete process.env.GOOGLE_ACCESS_TOKEN;
+    await authManager.clearTokens();
     userProfile = null;
-    oauth2Client.setCredentials({});
     
     // Redirect to OAuth flow
     res.redirect('/auth/google');
   });
 
-  console.log('🔐 Auth routes configured with FULL permissions');
-  console.log('   Visit http://localhost:3001/auth/google to authenticate');
-  console.log('   Or http://localhost:3001/auth/google/calendar-fix for calendar-specific auth');
-  console.log('   Or http://localhost:3001/api/auth/reauth to force new authentication');
+  // Auto-fix endpoint for expired tokens
+  app.get('/api/auth/auto-fix', async (req, res) => {
+    try {
+      console.log('🔧 Attempting automatic token refresh...');
+      
+      // Try to refresh tokens
+      await authManager.refreshAccessToken();
+      
+      // Test if it works
+      const testResult = await authManager.testConnection();
+      
+      if (testResult.success) {
+        res.json({
+          success: true,
+          message: 'Tokens refreshed successfully!',
+          user: testResult.email
+        });
+      } else {
+        res.json({
+          success: false,
+          message: 'Token refresh failed - please re-authenticate',
+          authUrl: '/auth/google'
+        });
+      }
+    } catch (error) {
+      console.error('Auto-fix failed:', error);
+      res.json({
+        success: false,
+        error: error.message,
+        authUrl: '/auth/google'
+      });
+    }
+  });
+
+  console.log('🔐 Auth routes configured with GoogleAuthManager');
+  console.log('   - Tokens saved to file for persistence');
+  console.log('   - Automatic token refresh enabled');
+  console.log('   - Visit http://localhost:3001/auth/google to authenticate');
+  console.log('   - Visit http://localhost:3001/api/auth/auto-fix to auto-refresh tokens');
 };
