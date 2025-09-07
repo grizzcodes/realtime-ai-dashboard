@@ -4,13 +4,17 @@
 class GmailServiceEnhanced {
   constructor(gmailService) {
     this.gmailService = gmailService;
-    this.gmail = gmailService?.gmail;
-    this.auth = gmailService?.auth;
+    // Properly access the gmail object from the service
+    this.gmail = gmailService?.gmail || gmailService?.getGmail?.();
+    this.auth = gmailService?.auth || gmailService?.getAuth?.();
   }
 
   async ensureAuth() {
     if (this.gmailService?.ensureAuth) {
       await this.gmailService.ensureAuth();
+      // Re-get the gmail object after auth
+      this.gmail = this.gmailService.gmail || this.gmailService.getGmail?.();
+      this.auth = this.gmailService.auth || this.gmailService.getAuth?.();
     }
   }
 
@@ -18,6 +22,14 @@ class GmailServiceEnhanced {
   async trashEmail(emailId) {
     try {
       await this.ensureAuth();
+      
+      if (!this.gmail) {
+        console.error('Gmail service not initialized');
+        return {
+          success: false,
+          error: 'Gmail service not properly initialized'
+        };
+      }
       
       await this.gmail.users.messages.trash({
         userId: 'me',
@@ -43,6 +55,13 @@ class GmailServiceEnhanced {
     try {
       await this.ensureAuth();
       
+      if (!this.gmail) {
+        return {
+          success: false,
+          error: 'Gmail service not properly initialized'
+        };
+      }
+      
       await this.gmail.users.messages.delete({
         userId: 'me',
         id: emailId
@@ -66,6 +85,13 @@ class GmailServiceEnhanced {
   async sendReply({ to, subject, body, threadId, inReplyTo, references }) {
     try {
       await this.ensureAuth();
+      
+      if (!this.gmail) {
+        return {
+          success: false,
+          error: 'Gmail service not properly initialized'
+        };
+      }
       
       // Build email headers for threading
       const headers = [
@@ -119,6 +145,14 @@ class GmailServiceEnhanced {
   async getFullEmail(emailId) {
     try {
       await this.ensureAuth();
+      
+      if (!this.gmail) {
+        console.error('Gmail service not initialized for getFullEmail');
+        return {
+          success: false,
+          error: 'Gmail service not properly initialized'
+        };
+      }
       
       const response = await this.gmail.users.messages.get({
         userId: 'me',
@@ -232,6 +266,14 @@ class GmailServiceEnhanced {
     try {
       await this.ensureAuth();
       
+      if (!this.gmail) {
+        return {
+          success: false,
+          error: 'Gmail service not properly initialized',
+          labels: []
+        };
+      }
+      
       const response = await this.gmail.users.labels.list({
         userId: 'me'
       });
@@ -254,6 +296,13 @@ class GmailServiceEnhanced {
   async applyLabel(emailId, labelId) {
     try {
       await this.ensureAuth();
+      
+      if (!this.gmail) {
+        return {
+          success: false,
+          error: 'Gmail service not properly initialized'
+        };
+      }
       
       await this.gmail.users.messages.modify({
         userId: 'me',
@@ -280,6 +329,13 @@ class GmailServiceEnhanced {
   async removeLabel(emailId, labelId) {
     try {
       await this.ensureAuth();
+      
+      if (!this.gmail) {
+        return {
+          success: false,
+          error: 'Gmail service not properly initialized'
+        };
+      }
       
       await this.gmail.users.messages.modify({
         userId: 'me',
