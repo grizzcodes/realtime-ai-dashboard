@@ -32,6 +32,29 @@ const IntegrationService = require('./src/services/integrationService');
 const integrationService = new IntegrationService();
 global.integrationService = integrationService;
 
+// Enhanced Gmail Service Integration
+const fs = require('fs');
+const path = require('path');
+if (fs.existsSync(path.join(__dirname, 'src/services/gmailServiceEnhanced.js'))) {
+  const GmailServiceEnhanced = require('./src/services/gmailServiceEnhanced');
+  if (integrationService.gmailService) {
+    const gmailServiceEnhanced = new GmailServiceEnhanced(integrationService.gmailService);
+    
+    // Add enhanced methods to existing service
+    Object.assign(integrationService.gmailService, {
+      trashEmail: gmailServiceEnhanced.trashEmail.bind(gmailServiceEnhanced),
+      deleteEmail: gmailServiceEnhanced.deleteEmail.bind(gmailServiceEnhanced),
+      sendReply: gmailServiceEnhanced.sendReply.bind(gmailServiceEnhanced),
+      getFullEmail: gmailServiceEnhanced.getFullEmail.bind(gmailServiceEnhanced),
+      getLabels: gmailServiceEnhanced.getLabels.bind(gmailServiceEnhanced),
+      applyLabel: gmailServiceEnhanced.applyLabel.bind(gmailServiceEnhanced),
+      removeLabel: gmailServiceEnhanced.removeLabel.bind(gmailServiceEnhanced)
+    });
+    
+    console.log('📧 Enhanced Gmail Service integrated - delete, thread, reply features added');
+  }
+}
+
 // Initialize Supabase if configured
 let supabaseClient = null;
 if (process.env.SUPABASE_URL && process.env.SUPABASE_ANON_KEY) {
@@ -57,9 +80,13 @@ app.get('/health', (req, res) => {
 require('./server.js'); // Gmail routes
 require('./enhanced-endpoints.js'); // Additional endpoints
 
+// Load Enhanced Gmail Routes
+if (fs.existsSync(path.join(__dirname, 'src/routes/gmailEnhancedRoutes.js'))) {
+  require('./src/routes/gmailEnhancedRoutes')(app, integrationService.gmailService);
+  console.log('✨ Enhanced Gmail routes loaded - smart reply, delete, thread support');
+}
+
 // Load Enhanced Magic Inbox routes (NEW)
-const fs = require('fs');
-const path = require('path');
 if (fs.existsSync(path.join(__dirname, 'enhanced-magic-inbox-routes.js'))) {
   const setupEnhancedMagicInbox = require('./enhanced-magic-inbox-routes');
   setupEnhancedMagicInbox(app, io, integrationService);
@@ -172,6 +199,7 @@ server.listen(PORT, () => {
   console.log(`📊 Dashboard: http://localhost:${PORT}/health`);
   console.log('🔗 WebSocket server active');
   console.log('🤖 AI services ready with memory, modes, and company context');
+  console.log('📧 Enhanced Gmail features available');
   
   // Show OAuth setup reminder if not configured
   if (!process.env.GOOGLE_REFRESH_TOKEN) {
@@ -186,6 +214,11 @@ server.listen(PORT, () => {
     console.log(`   1. Complete reset: http://localhost:${PORT}/api/auth/reset-and-fix`);
     console.log(`   2. Emergency fix: http://localhost:${PORT}/api/calendar/fix-and-test`);
     console.log('');
+  }
+  
+  // Show OpenAI setup reminder for smart replies
+  if (!process.env.OPENAI_API_KEY) {
+    console.log('⚠️  Smart replies disabled - Add OPENAI_API_KEY to .env for AI-powered email responses');
   }
 });
 
