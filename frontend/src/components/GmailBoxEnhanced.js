@@ -7,8 +7,10 @@ import {
   FileText, 
   ChevronDown, 
   ChevronUp,
+  ChevronRight,
   Trash2,
   Reply,
+  Forward,
   Star,
   Archive,
   Sparkles,
@@ -16,7 +18,9 @@ import {
   Edit,
   X,
   Check,
-  AlertCircle
+  AlertCircle,
+  Paperclip,
+  ExternalLink
 } from 'lucide-react';
 
 const GmailBoxEnhanced = () => {
@@ -79,11 +83,13 @@ const GmailBoxEnhanced = () => {
       setExpandedEmail(null);
       setReplyDraft('');
       setEditingReply(false);
+      setDeleteConfirm(null);
     } else {
       const fullEmail = await fetchEmailDetails(email.id);
       setExpandedEmail(fullEmail || email);
       setReplyDraft('');
       setEditingReply(false);
+      setDeleteConfirm(null);
       
       // Mark as read
       if (email.isUnread) {
@@ -217,16 +223,29 @@ const GmailBoxEnhanced = () => {
     }
   };
 
+  const truncateText = (text, maxLength = 50) => {
+    if (!text) return '';
+    if (text.length <= maxLength) return text;
+    return text.substring(0, maxLength) + '...';
+  };
+
+  const getEmailPreview = (email) => {
+    const from = email.from?.split('<')[0]?.trim() || email.from || '';
+    return truncateText(from, 20);
+  };
+
   return (
     <div className="gmail-box-enhanced" style={{
-      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+      background: 'linear-gradient(135deg, #1e3a8a 0%, #3730a3 100%)',
       borderRadius: '20px',
       padding: '1.5rem',
       color: 'white',
       height: '600px',
       display: 'flex',
-      flexDirection: 'column'
+      flexDirection: 'column',
+      overflow: 'hidden'
     }}>
+      {/* Header */}
       <div style={{
         display: 'flex',
         justifyContent: 'space-between',
@@ -234,14 +253,26 @@ const GmailBoxEnhanced = () => {
         marginBottom: '1rem'
       }}>
         <div style={{
-          fontSize: '1.5rem',
+          fontSize: '1.25rem',
           fontWeight: 'bold',
           display: 'flex',
           alignItems: 'center',
           gap: '0.5rem'
         }}>
-          <Mail size={24} />
-          Gmail Enhanced
+          <Mail size={20} />
+          Gmail
+          {emails.filter(e => e.isUnread).length > 0 && (
+            <span style={{ 
+              background: '#ef4444', 
+              color: 'white', 
+              borderRadius: '12px', 
+              padding: '2px 8px',
+              fontSize: '0.75rem',
+              marginLeft: '0.5rem'
+            }}>
+              {emails.filter(e => e.isUnread).length}
+            </span>
+          )}
         </div>
         <button 
           onClick={fetchEmails}
@@ -251,16 +282,20 @@ const GmailBoxEnhanced = () => {
             color: 'white',
             padding: '0.5rem',
             borderRadius: '8px',
-            cursor: 'pointer'
+            cursor: 'pointer',
+            transition: 'all 0.3s ease'
           }}
+          onMouseEnter={(e) => e.target.style.background = 'rgba(255, 255, 255, 0.3)'}
+          onMouseLeave={(e) => e.target.style.background = 'rgba(255, 255, 255, 0.2)'}
         >
-          <RefreshCw size={18} />
+          <RefreshCw size={16} />
         </button>
       </div>
 
+      {/* Tabs */}
       <div style={{
         display: 'flex',
-        gap: '1rem',
+        gap: '0.5rem',
         marginBottom: '1rem',
         borderBottom: '1px solid rgba(255, 255, 255, 0.2)',
         paddingBottom: '0.5rem'
@@ -278,21 +313,23 @@ const GmailBoxEnhanced = () => {
               border: 'none',
               color: activeTab === tab ? 'white' : 'rgba(255, 255, 255, 0.7)',
               cursor: 'pointer',
-              borderRadius: '10px',
-              textTransform: 'capitalize'
+              borderRadius: '8px',
+              textTransform: 'capitalize',
+              fontSize: '0.875rem',
+              transition: 'all 0.3s ease'
             }}
           >
-            {tab === 'inbox' && <Inbox size={18} />}
-            {tab === 'sent' && <Send size={18} />}
-            {tab === 'drafts' && <FileText size={18} />}
+            {tab === 'inbox' && <Inbox size={16} />}
+            {tab === 'sent' && <Send size={16} />}
+            {tab === 'drafts' && <FileText size={16} />}
             {tab}
-            {tab === 'inbox' && emails.filter(e => e.isUnread).length > 0 && (
+            {tab === 'inbox' && emails.filter(e => e.isUnread && activeTab === 'inbox').length > 0 && (
               <span style={{ 
-                background: '#f44336', 
+                background: '#ef4444', 
                 color: 'white', 
                 borderRadius: '10px', 
-                padding: '2px 6px',
-                fontSize: '0.75rem'
+                padding: '1px 6px',
+                fontSize: '0.7rem'
               }}>
                 {emails.filter(e => e.isUnread).length}
               </span>
@@ -301,339 +338,451 @@ const GmailBoxEnhanced = () => {
         ))}
       </div>
 
+      {/* Email List */}
       <div style={{
         flex: 1,
         overflowY: 'auto',
-        background: 'rgba(255, 255, 255, 0.1)',
-        borderRadius: '15px',
-        padding: '1rem'
+        overflowX: 'hidden',
+        background: 'rgba(255, 255, 255, 0.05)',
+        borderRadius: '12px',
+        padding: '0.75rem'
       }}>
         {loading ? (
           <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '200px' }}>
-            <RefreshCw className="animate-spin" size={32} />
+            <RefreshCw className="animate-spin" size={24} style={{ animation: 'spin 1s linear infinite' }} />
           </div>
         ) : error ? (
           <div style={{
             background: 'rgba(244, 67, 54, 0.1)',
-            border: '1px solid #f44336',
-            color: '#f44336',
+            border: '1px solid rgba(244, 67, 54, 0.3)',
+            color: '#ff6b6b',
             padding: '1rem',
             borderRadius: '8px',
-            marginBottom: '1rem'
+            fontSize: '0.875rem'
           }}>
-            <AlertCircle size={20} style={{ marginRight: '0.5rem', display: 'inline' }} />
+            <AlertCircle size={16} style={{ marginRight: '0.5rem', display: 'inline' }} />
             {error}
           </div>
         ) : emails.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: '2rem', color: 'rgba(255, 255, 255, 0.8)' }}>
-            <Mail size={48} style={{ opacity: 0.5, marginBottom: '1rem' }} />
-            <p>No emails in {activeTab}</p>
+          <div style={{ textAlign: 'center', padding: '2rem', color: 'rgba(255, 255, 255, 0.6)' }}>
+            <Mail size={36} style={{ opacity: 0.3, marginBottom: '0.5rem' }} />
+            <p style={{ fontSize: '0.875rem' }}>No emails in {activeTab}</p>
           </div>
         ) : (
-          <>
-            {expandedEmail && (
-              <div style={{
-                background: 'white',
-                borderRadius: '15px',
-                padding: '1.5rem',
-                marginBottom: '1rem',
-                boxShadow: '0 10px 30px rgba(0, 0, 0, 0.1)'
-              }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem' }}>
-                  <div>
-                    <div style={{ fontWeight: '600', color: '#333' }}>{expandedEmail.from}</div>
-                    <div style={{ fontSize: '0.95rem', color: '#444' }}>{expandedEmail.subject}</div>
-                  </div>
-                  <button 
-                    onClick={() => setExpandedEmail(null)}
-                    style={{ background: 'none', border: 'none', cursor: 'pointer' }}
-                  >
-                    <X size={20} />
-                  </button>
-                </div>
-
-                <div style={{
-                  margin: '1rem 0',
-                  padding: '1rem',
-                  background: '#f8f9fa',
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            {emails.map((email) => {
+              const isExpanded = expandedEmail?.id === email.id;
+              
+              return (
+                <div key={email.id} style={{
+                  background: isExpanded ? 'rgba(255, 255, 255, 0.95)' : 
+                            email.isUnread ? 'rgba(255, 255, 255, 0.9)' : 'rgba(255, 255, 255, 0.8)',
+                  color: '#1e293b',
                   borderRadius: '10px',
-                  maxHeight: '300px',
-                  overflowY: 'auto',
-                  whiteSpace: 'pre-wrap',
-                  fontSize: '0.9rem',
-                  lineHeight: '1.6',
-                  color: '#333'
-                }}>
-                  {expandedEmail.body || expandedEmail.snippet}
-                </div>
-
-                {expandedEmail.thread && expandedEmail.thread.length > 1 && (
-                  <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid #e0e0e0' }}>
-                    <h4 style={{ marginBottom: '0.5rem', color: '#666' }}>
-                      Thread ({expandedEmail.thread.length} messages)
-                    </h4>
-                    {expandedEmail.thread.map((msg, idx) => (
-                      <div key={idx} style={{
-                        padding: '0.75rem',
-                        background: '#f8f9fa',
-                        borderRadius: '8px',
-                        marginBottom: '0.5rem',
-                        fontSize: '0.85rem'
-                      }}>
-                        <strong>{msg.from}</strong> - {formatDate(msg.date)}
-                        <div>{msg.snippet}</div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem' }}>
-                  <button 
-                    onClick={generateSmartReply}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.5rem',
-                      padding: '0.5rem 1rem',
-                      border: 'none',
-                      borderRadius: '8px',
-                      cursor: 'pointer',
-                      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                      color: 'white'
-                    }}
-                  >
-                    <Sparkles size={16} />
-                    {generatingReply ? 'Generating...' : 'Smart Reply'}
-                  </button>
-                  <button 
-                    onClick={() => setEditingReply(true)}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.5rem',
-                      padding: '0.5rem 1rem',
-                      border: 'none',
-                      borderRadius: '8px',
-                      cursor: 'pointer',
-                      background: '#4CAF50',
-                      color: 'white'
-                    }}
-                  >
-                    <Reply size={16} />
-                    Reply
-                  </button>
-                  <button 
-                    onClick={() => archiveEmail(expandedEmail.id)}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.5rem',
-                      padding: '0.5rem 1rem',
-                      border: 'none',
-                      borderRadius: '8px',
-                      cursor: 'pointer',
-                      background: '#2196F3',
-                      color: 'white'
-                    }}
-                  >
-                    <Archive size={16} />
-                    Archive
-                  </button>
-                  <button 
-                    onClick={() => setDeleteConfirm(expandedEmail.id)}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.5rem',
-                      padding: '0.5rem 1rem',
-                      border: 'none',
-                      borderRadius: '8px',
-                      cursor: 'pointer',
-                      background: '#f44336',
-                      color: 'white'
-                    }}
-                  >
-                    <Trash2 size={16} />
-                    Delete
-                  </button>
-                </div>
-
-                {deleteConfirm === expandedEmail.id && (
-                  <div style={{
-                    background: '#fff3cd',
-                    border: '1px solid #ffc107',
-                    color: '#856404',
-                    padding: '1rem',
-                    borderRadius: '8px',
-                    marginTop: '0.5rem'
-                  }}>
-                    Are you sure you want to delete this email?
-                    <div style={{ marginTop: '0.5rem' }}>
-                      <button 
-                        onClick={() => deleteEmail(expandedEmail.id)}
-                        style={{
-                          marginRight: '0.5rem',
-                          padding: '0.5rem 1rem',
-                          background: '#f44336',
-                          color: 'white',
-                          border: 'none',
-                          borderRadius: '8px',
-                          cursor: 'pointer'
-                        }}
-                      >
-                        <Check size={16} style={{ display: 'inline', marginRight: '0.25rem' }} />
-                        Yes, Delete
-                      </button>
-                      <button 
-                        onClick={() => setDeleteConfirm(null)}
-                        style={{
-                          padding: '0.5rem 1rem',
-                          background: '#ccc',
-                          color: '#333',
-                          border: 'none',
-                          borderRadius: '8px',
-                          cursor: 'pointer'
-                        }}
-                      >
-                        <X size={16} style={{ display: 'inline', marginRight: '0.25rem' }} />
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {editingReply && (
-                  <div style={{
-                    marginTop: '1rem',
-                    padding: '1rem',
-                    background: '#f0f0f0',
-                    borderRadius: '10px'
-                  }}>
-                    <h4 style={{ marginBottom: '0.5rem', color: '#333' }}>
-                      Reply to: {expandedEmail.from}
-                    </h4>
-                    <textarea
-                      value={replyDraft}
-                      onChange={(e) => setReplyDraft(e.target.value)}
-                      placeholder="Write your reply here..."
-                      style={{
-                        width: '100%',
-                        minHeight: '150px',
-                        padding: '0.75rem',
-                        border: '1px solid #ddd',
-                        borderRadius: '8px',
-                        fontFamily: 'inherit',
-                        fontSize: '0.9rem',
-                        resize: 'vertical'
-                      }}
-                    />
-                    <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem' }}>
-                      <button 
-                        onClick={sendReply}
-                        disabled={!replyDraft.trim()}
-                        style={{
-                          padding: '0.5rem 1rem',
-                          background: '#4CAF50',
-                          color: 'white',
-                          border: 'none',
-                          borderRadius: '8px',
-                          cursor: replyDraft.trim() ? 'pointer' : 'not-allowed',
-                          opacity: replyDraft.trim() ? 1 : 0.5
-                        }}
-                      >
-                        <Send size={16} style={{ display: 'inline', marginRight: '0.25rem' }} />
-                        Send Reply
-                      </button>
-                      <button 
-                        onClick={generateSmartReply}
-                        style={{
-                          padding: '0.5rem 1rem',
-                          background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                          color: 'white',
-                          border: 'none',
-                          borderRadius: '8px',
-                          cursor: 'pointer'
-                        }}
-                      >
-                        <Sparkles size={16} style={{ display: 'inline', marginRight: '0.25rem' }} />
-                        Regenerate
-                      </button>
-                      <button 
-                        onClick={() => {
-                          setEditingReply(false);
-                          setReplyDraft('');
-                        }}
-                        style={{
-                          padding: '0.5rem 1rem',
-                          background: '#ccc',
-                          color: '#333',
-                          border: 'none',
-                          borderRadius: '8px',
-                          cursor: 'pointer'
-                        }}
-                      >
-                        <X size={16} style={{ display: 'inline', marginRight: '0.25rem' }} />
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {emails.map((email) => (
-              <div 
-                key={email.id}
-                onClick={() => handleEmailClick(email)}
-                style={{
-                  background: email.isUnread ? 'white' : 'rgba(255, 255, 255, 0.95)',
-                  color: '#333',
-                  borderRadius: '10px',
-                  padding: '1rem',
-                  marginBottom: '0.75rem',
-                  cursor: 'pointer',
-                  transition: 'all 0.3s ease',
-                  fontWeight: email.isUnread ? '600' : 'normal'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.transform = 'translateX(5px)';
-                  e.currentTarget.style.boxShadow = '0 5px 15px rgba(0, 0, 0, 0.1)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.transform = 'translateX(0)';
-                  e.currentTarget.style.boxShadow = 'none';
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.5rem' }}>
-                  <div style={{ fontWeight: '600', color: '#333' }}>
-                    {email.isStarred && <Star size={14} fill="gold" color="gold" style={{ marginRight: '0.25rem', display: 'inline' }} />}
-                    {email.from}
-                  </div>
-                  <div style={{ fontSize: '0.85rem', color: '#666' }}>{formatDate(email.date)}</div>
-                </div>
-                <div style={{ fontSize: '0.95rem', marginBottom: '0.5rem', color: '#444' }}>{email.subject}</div>
-                <div style={{
-                  fontSize: '0.85rem',
-                  color: '#666',
                   overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  display: '-webkit-box',
-                  WebkitLineClamp: 2,
-                  WebkitBoxOrient: 'vertical'
-                }}>{email.snippet}</div>
-                <div style={{ display: 'flex', alignItems: 'center', marginTop: '0.5rem' }}>
-                  {expandedEmail?.id === email.id ? (
-                    <ChevronUp size={16} />
-                  ) : (
-                    <ChevronDown size={16} />
+                  transition: 'all 0.3s ease',
+                  cursor: 'pointer'
+                }}>
+                  {/* Email Header Row */}
+                  <div 
+                    onClick={() => handleEmailClick(email)}
+                    style={{
+                      padding: '0.75rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.75rem'
+                    }}
+                  >
+                    {/* Expand Chevron */}
+                    <div style={{ color: '#6b7280' }}>
+                      {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                    </div>
+                    
+                    {/* Star */}
+                    {email.isStarred && <Star size={14} fill="#fbbf24" color="#fbbf24" />}
+                    
+                    {/* From */}
+                    <div style={{
+                      fontWeight: email.isUnread ? '600' : '400',
+                      fontSize: '0.875rem',
+                      minWidth: '120px',
+                      maxWidth: '120px',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap'
+                    }}>
+                      {getEmailPreview(email)}
+                    </div>
+                    
+                    {/* Subject & Snippet */}
+                    <div style={{
+                      flex: 1,
+                      display: 'flex',
+                      gap: '0.5rem',
+                      overflow: 'hidden'
+                    }}>
+                      <span style={{
+                        fontWeight: email.isUnread ? '600' : '400',
+                        fontSize: '0.875rem',
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        maxWidth: '200px'
+                      }}>
+                        {truncateText(email.subject, 30)}
+                      </span>
+                      <span style={{
+                        color: '#6b7280',
+                        fontSize: '0.875rem',
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis'
+                      }}>
+                        - {truncateText(email.snippet, 40)}
+                      </span>
+                    </div>
+                    
+                    {/* Labels */}
+                    {email.labels && email.labels.includes('IMPORTANT') && (
+                      <span style={{
+                        background: '#fbbf24',
+                        color: '#78350f',
+                        padding: '2px 6px',
+                        borderRadius: '4px',
+                        fontSize: '0.65rem',
+                        fontWeight: '500'
+                      }}>IMPORTANT</span>
+                    )}
+                    
+                    {/* Date */}
+                    <div style={{
+                      fontSize: '0.75rem',
+                      color: '#6b7280',
+                      whiteSpace: 'nowrap'
+                    }}>
+                      {formatDate(email.date)}
+                    </div>
+                    
+                    {/* Quick Actions */}
+                    <div style={{
+                      display: 'flex',
+                      gap: '0.25rem'
+                    }} onClick={(e) => e.stopPropagation()}>
+                      {!isExpanded && (
+                        <>
+                          <button
+                            onClick={() => handleEmailClick(email)}
+                            title="Reply"
+                            style={{
+                              background: 'transparent',
+                              border: 'none',
+                              color: '#6b7280',
+                              cursor: 'pointer',
+                              padding: '4px'
+                            }}
+                          >
+                            <Reply size={14} />
+                          </button>
+                          <button
+                            onClick={() => {
+                              if (window.confirm('Delete this email?')) {
+                                deleteEmail(email.id);
+                              }
+                            }}
+                            title="Delete"
+                            style={{
+                              background: 'transparent',
+                              border: 'none',
+                              color: '#6b7280',
+                              cursor: 'pointer',
+                              padding: '4px'
+                            }}
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Expanded Content */}
+                  {isExpanded && expandedEmail && (
+                    <div style={{
+                      padding: '0 0.75rem 0.75rem 0.75rem',
+                      borderTop: '1px solid #e5e7eb'
+                    }}>
+                      {/* Full Email Body */}
+                      <div style={{
+                        margin: '0.75rem 0',
+                        padding: '0.75rem',
+                        background: '#f9fafb',
+                        borderRadius: '8px',
+                        maxHeight: '200px',
+                        overflowY: 'auto',
+                        fontSize: '0.875rem',
+                        lineHeight: '1.5',
+                        color: '#374151',
+                        whiteSpace: 'pre-wrap',
+                        wordWrap: 'break-word'
+                      }}>
+                        {expandedEmail.body || expandedEmail.snippet}
+                      </div>
+
+                      {/* Action Buttons */}
+                      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingReply(true);
+                          }}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.25rem',
+                            padding: '0.375rem 0.75rem',
+                            border: 'none',
+                            borderRadius: '6px',
+                            cursor: 'pointer',
+                            background: '#3b82f6',
+                            color: 'white',
+                            fontSize: '0.75rem'
+                          }}
+                        >
+                          <Reply size={14} />
+                          Reply
+                        </button>
+                        
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            generateSmartReply();
+                          }}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.25rem',
+                            padding: '0.375rem 0.75rem',
+                            border: 'none',
+                            borderRadius: '6px',
+                            cursor: 'pointer',
+                            background: 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)',
+                            color: 'white',
+                            fontSize: '0.75rem'
+                          }}
+                        >
+                          <Sparkles size={14} />
+                          {generatingReply ? 'Generating...' : 'Smart Reply'}
+                        </button>
+
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            alert('Forward feature coming soon!');
+                          }}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.25rem',
+                            padding: '0.375rem 0.75rem',
+                            border: 'none',
+                            borderRadius: '6px',
+                            cursor: 'pointer',
+                            background: '#10b981',
+                            color: 'white',
+                            fontSize: '0.75rem'
+                          }}
+                        >
+                          <Forward size={14} />
+                          Forward
+                        </button>
+                        
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            archiveEmail(expandedEmail.id);
+                          }}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.25rem',
+                            padding: '0.375rem 0.75rem',
+                            border: 'none',
+                            borderRadius: '6px',
+                            cursor: 'pointer',
+                            background: '#6b7280',
+                            color: 'white',
+                            fontSize: '0.75rem'
+                          }}
+                        >
+                          <Archive size={14} />
+                          Archive
+                        </button>
+                        
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDeleteConfirm(expandedEmail.id);
+                          }}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.25rem',
+                            padding: '0.375rem 0.75rem',
+                            border: 'none',
+                            borderRadius: '6px',
+                            cursor: 'pointer',
+                            background: '#ef4444',
+                            color: 'white',
+                            fontSize: '0.75rem'
+                          }}
+                        >
+                          <Trash2 size={14} />
+                          Delete
+                        </button>
+                      </div>
+
+                      {/* Delete Confirmation */}
+                      {deleteConfirm === expandedEmail.id && (
+                        <div style={{
+                          background: '#fef2f2',
+                          border: '1px solid #fecaca',
+                          color: '#991b1b',
+                          padding: '0.75rem',
+                          borderRadius: '6px',
+                          marginTop: '0.5rem',
+                          fontSize: '0.875rem'
+                        }}>
+                          Are you sure you want to delete this email?
+                          <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem' }}>
+                            <button 
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                deleteEmail(expandedEmail.id);
+                              }}
+                              style={{
+                                padding: '0.25rem 0.75rem',
+                                background: '#ef4444',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '4px',
+                                cursor: 'pointer',
+                                fontSize: '0.75rem'
+                              }}
+                            >
+                              Yes, Delete
+                            </button>
+                            <button 
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setDeleteConfirm(null);
+                              }}
+                              style={{
+                                padding: '0.25rem 0.75rem',
+                                background: '#6b7280',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '4px',
+                                cursor: 'pointer',
+                                fontSize: '0.75rem'
+                              }}
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Reply Editor */}
+                      {editingReply && (
+                        <div style={{
+                          marginTop: '0.75rem',
+                          padding: '0.75rem',
+                          background: '#f3f4f6',
+                          borderRadius: '8px'
+                        }}>
+                          <div style={{ marginBottom: '0.5rem', fontSize: '0.875rem', fontWeight: '500', color: '#374151' }}>
+                            Reply to: {expandedEmail.from}
+                          </div>
+                          <textarea
+                            value={replyDraft}
+                            onChange={(e) => setReplyDraft(e.target.value)}
+                            placeholder="Write your reply here..."
+                            style={{
+                              width: '100%',
+                              minHeight: '100px',
+                              padding: '0.5rem',
+                              border: '1px solid #d1d5db',
+                              borderRadius: '6px',
+                              fontFamily: 'inherit',
+                              fontSize: '0.875rem',
+                              resize: 'vertical',
+                              boxSizing: 'border-box'
+                            }}
+                          />
+                          <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
+                            <button 
+                              onClick={sendReply}
+                              disabled={!replyDraft.trim()}
+                              style={{
+                                padding: '0.375rem 0.75rem',
+                                background: replyDraft.trim() ? '#3b82f6' : '#9ca3af',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '6px',
+                                cursor: replyDraft.trim() ? 'pointer' : 'not-allowed',
+                                fontSize: '0.75rem',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.25rem'
+                              }}
+                            >
+                              <Send size={14} />
+                              Send
+                            </button>
+                            <button 
+                              onClick={generateSmartReply}
+                              style={{
+                                padding: '0.375rem 0.75rem',
+                                background: 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '6px',
+                                cursor: 'pointer',
+                                fontSize: '0.75rem',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.25rem'
+                              }}
+                            >
+                              <Sparkles size={14} />
+                              Generate
+                            </button>
+                            <button 
+                              onClick={() => {
+                                setEditingReply(false);
+                                setReplyDraft('');
+                              }}
+                              style={{
+                                padding: '0.375rem 0.75rem',
+                                background: '#6b7280',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '6px',
+                                cursor: 'pointer',
+                                fontSize: '0.75rem'
+                              }}
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   )}
-                  <span style={{ fontSize: '0.75rem', marginLeft: '0.25rem', color: '#666' }}>
-                    Click to {expandedEmail?.id === email.id ? 'collapse' : 'expand'}
-                  </span>
                 </div>
-              </div>
-            ))}
-          </>
+              );
+            })}
+          </div>
         )}
       </div>
     </div>
