@@ -5,7 +5,7 @@ import MagicInbox from './components/MagicInbox';
 import SupaDashboard from './components/SupaDashboard';
 import ProductionTab from './components/ProductionTab';
 import ExpandableCard from './components/ExpandableCard';
-import GmailBox from './components/GmailBox';  // Import the new GmailBox component
+import GmailBoxEnhanced from './components/GmailBoxEnhanced';  // Changed to Enhanced component
 import './App.css';
 import './App.enhanced.css';
 
@@ -720,9 +720,9 @@ const App = () => {
               </ExpandableCard>
             </div>
 
-            {/* Right Column - Gmail Box Component */}
+            {/* Right Column - Enhanced Gmail Box Component */}
             <div className="h-[600px]">
-              <GmailBox />
+              <GmailBoxEnhanced />
             </div>
           </div>
         )}
