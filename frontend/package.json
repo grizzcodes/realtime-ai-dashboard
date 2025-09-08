@@ -5,6 +5,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.57.0",
     "@octokit/rest": "^22.0.0",
+    "@supabase/supabase-js": "^2.39.3",
     "axios": "^1.6.5",
     "lucide-react": "^0.263.1",
     "openai": "^5.11.0",
