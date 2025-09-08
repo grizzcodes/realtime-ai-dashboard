@@ -12,15 +12,86 @@ const TaskDashboard = () => {
     fetchTasks();
   }, []);
 
+  const getMockTasks = () => {
+    const today = new Date();
+    return [
+      {
+        id: '1',
+        title: 'RASA IDEAS AI',
+        assignee: 'Alec Chapados, Leo Ramlall, Pablo',
+        priority: 'high',
+        status: 'pending',
+        dueDate: new Date(today.getTime() - 3 * 24 * 60 * 60 * 1000).toISOString(), // 3 days ago
+        description: 'AI-powered research assistant system architecture',
+        tags: ['AI', 'Research', 'MVP']
+      },
+      {
+        id: '2',
+        title: 'CLAY + SENDING READY FOR THIS WEEK WITH Thierry',
+        assignee: 'Alec Chapados',
+        priority: 'high',
+        status: 'pending',
+        dueDate: new Date(today.getTime()).toISOString(), // Today
+        description: 'Prepare and send weekly update with Thierry',
+        tags: ['Weekly', 'Communication']
+      },
+      {
+        id: '3',
+        title: 'AFTER BEEP FINISH SCRIPT W/ AIDAN',
+        assignee: 'Alec Chapados',
+        priority: 'high',
+        status: 'in progress',
+        dueDate: new Date(today.getTime() + 3 * 24 * 60 * 60 * 1000).toISOString(), // In 3 days
+        description: 'Complete script revisions with Aidan after beep sound effects',
+        tags: ['Script', 'Audio', 'Collaboration']
+      },
+      {
+        id: '4',
+        title: 'PACT! MAKE A FUCKED UP PANDA BADASS PANDA+ CGI IDEAS',
+        assignee: 'Leo Ramlall, Alec Chapados',
+        priority: 'medium',
+        status: 'pending',
+        dueDate: new Date(today.getTime() - 2 * 24 * 60 * 60 * 1000).toISOString(), // 2 days ago
+        description: 'Develop CGI concepts for the Panda character',
+        tags: ['CGI', 'Creative', 'Character Design']
+      },
+      {
+        id: '5',
+        title: 'POST PARTNERSHIP WITH REVE.ART',
+        assignee: 'Alec Chapados',
+        priority: 'medium',
+        status: 'pending',
+        dueDate: new Date(today.getTime() + 10 * 24 * 60 * 60 * 1000).toISOString(), // In 10 days
+        description: 'Announce partnership with REVE.ART on social media',
+        tags: ['Partnership', 'Marketing', 'Social Media']
+      },
+      {
+        id: '6',
+        title: 'Develop automated workflow model to reinforce Gus\'s character depth and generate content ideas',
+        assignee: 'Leo Ramlall',
+        priority: 'medium',
+        status: 'pending',
+        dueDate: new Date(today.getTime() + 21 * 24 * 60 * 60 * 1000).toISOString(), // In 3 weeks
+        description: 'Create automated system for character development and content generation',
+        tags: ['Automation', 'Character', 'Content']
+      }
+    ];
+  };
+
   const fetchTasks = async () => {
     try {
       const response = await fetch('http://localhost:3001/api/notion/tasks');
       const data = await response.json();
-      if (data.success) {
-        setTasks(data.tasks || []);
+      if (data.success && data.tasks && data.tasks.length > 0) {
+        setTasks(data.tasks);
+      } else {
+        // Use mock data if API returns no tasks
+        setTasks(getMockTasks());
       }
     } catch (error) {
       console.error('Failed to fetch tasks:', error);
+      // Use mock data on error
+      setTasks(getMockTasks());
     } finally {
       setLoading(false);
     }
@@ -31,6 +102,9 @@ const TaskDashboard = () => {
     
     const date = new Date(dateString);
     const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    date.setHours(0, 0, 0, 0);
+    
     const diffTime = date - now;
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
     
@@ -40,21 +114,29 @@ const TaskDashboard = () => {
       return 'Tomorrow';
     } else if (diffDays === -1) {
       return 'Yesterday';
-    } else if (diffDays > 0 && diffDays <= 7) {
+    } else if (diffDays > 1 && diffDays <= 7) {
       return `in ${diffDays} days`;
     } else if (diffDays > 7 && diffDays <= 14) {
-      return 'Next week';
-    } else if (diffDays > 14 && diffDays <= 30) {
-      const weeks = Math.ceil(diffDays / 7);
-      return `in ${weeks} weeks`;
-    } else if (diffDays > 30 && diffDays <= 365) {
-      const months = Math.ceil(diffDays / 30);
-      return months === 1 ? 'in 1 month' : `in ${months} months`;
+      return 'in 1 week';
+    } else if (diffDays > 14 && diffDays <= 21) {
+      return 'in 2 weeks';
+    } else if (diffDays > 21 && diffDays <= 30) {
+      return 'in 3 weeks';
+    } else if (diffDays > 30 && diffDays <= 60) {
+      return 'in 1 month';
+    } else if (diffDays > 60 && diffDays <= 90) {
+      return 'in 2 months';
+    } else if (diffDays > 90) {
+      const months = Math.round(diffDays / 30);
+      return `in ${months} months`;
     } else if (diffDays < 0 && diffDays >= -7) {
       return `${Math.abs(diffDays)} days ago`;
-    } else if (diffDays < -7) {
-      const weeks = Math.ceil(Math.abs(diffDays) / 7);
-      return `${weeks} weeks ago`;
+    } else if (diffDays < -7 && diffDays >= -30) {
+      const weeks = Math.round(Math.abs(diffDays) / 7);
+      return `${weeks} week${weeks > 1 ? 's' : ''} ago`;
+    } else if (diffDays < -30) {
+      const months = Math.round(Math.abs(diffDays) / 30);
+      return `${months} month${months > 1 ? 's' : ''} ago`;
     } else {
       return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
     }
